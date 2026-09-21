@@ -8,6 +8,7 @@ import BoilerplateInspector from './components/BoilerplateInspector';
 import SystemStatsDashboard from './components/SystemStatsDashboard';
 import PixovoClientDownsampler from './utils/client_downsampler';
 import { saveOriginalBlob, getPendingBlobs, removeOriginalBlob, sweepStaleBlobs, clearAllBlobs } from './utils/indexedDB';
+import { uploadOriginal, resetTransport, Outcome } from './utils/uploadTransport';
 import './styles/storymode.css';
 
 export default function App() {
@@ -122,23 +123,26 @@ export default function App() {
         }
 
         try {
-          const formData = new FormData();
-          formData.append('file', item.blob, item.filename);
+          // confirmFirst: the object may already be in storage from before the
+          // refresh, with only the confirm call lost. Asking costs one small
+          // request; assuming otherwise costs a full re-upload of up to 20MB.
+          const outcome = await uploadOriginal({
+            sessionId: itemSession,
+            photoId: item.photoId,
+            file: item.blob,
+            confirmFirst: true,
+          });
 
-          const res = await fetch(
-            `/api/upload-originals?session_id=${encodeURIComponent(itemSession)}&photo_id=${encodeURIComponent(item.photoId)}`,
-            { method: 'POST', body: formData }
-          );
-
-          if (res.ok) {
+          if (outcome === Outcome.DONE) {
             await removeOriginalBlob(item.photoId);
             count++;
             setSyncStatus({ synced: count, total: pending.length });
-          } else if (res.status === 403 || res.status === 404) {
+          } else if (outcome === Outcome.PERMANENT) {
             // The server will never accept this blob — stop retrying it.
-            console.warn(`[IndexedDB Auto-Resume] Server rejected ${item.photoId} (${res.status}); discarding.`);
+            console.warn(`[IndexedDB Auto-Resume] Discarding ${item.photoId}; server will never accept it.`);
             await removeOriginalBlob(item.photoId);
           }
+          // Outcome.RETRY: leave the blob queued for the next `online` event.
         } catch (err) {
           console.warn(`[IndexedDB Auto-Resume] Network offline, will retry later for ${item.photoId}:`, err);
         }
@@ -224,25 +228,28 @@ export default function App() {
         await saveOriginalBlob(photoId, file, uploadSessionId);
 
         try {
-          const formData = new FormData();
-          formData.append('file', file);
+          // The transport negotiates with the server: direct-to-bucket when
+          // that is enabled, otherwise the original multipart endpoint. Either
+          // way the outcome vocabulary here is the same.
+          const outcome = await uploadOriginal({
+            sessionId: uploadSessionId,
+            photoId,
+            file,
+          });
 
-          const res = await fetch(
-            `/api/upload-originals?session_id=${encodeURIComponent(uploadSessionId)}&photo_id=${encodeURIComponent(photoId)}`,
-            { method: 'POST', body: formData }
-          );
-
-          if (res.ok) {
+          if (outcome === Outcome.DONE) {
             await removeOriginalBlob(photoId);
             syncedIdsRef.current.add(photoId);
             syncedCount++;
             setSyncStatus({ synced: syncedCount, total });
-          } else if (res.status === 403 || res.status === 404 || res.status === 413) {
-            // Permanent: wrong session, unknown photo, or over the size/disk cap.
-            console.warn(`[Background Sync] Server rejected ${photoId} (${res.status}); discarding.`);
+          } else if (outcome === Outcome.PERMANENT) {
+            // Wrong session, unknown photo, or over the size/quota cap. Mark it
+            // synced so the queue stops offering it back.
+            console.warn(`[Background Sync] Discarding ${photoId}; server will never accept it.`);
             await removeOriginalBlob(photoId);
             syncedIdsRef.current.add(photoId);
           }
+          // Outcome.RETRY: the blob stays in IndexedDB for auto-resume.
         } catch (err) {
           console.warn(`[Background Sync] Will retry later for ${photoId}:`, err);
         }
@@ -598,6 +605,10 @@ export default function App() {
 
     persistSessionId(null);
     await clearAllBlobs();
+    // The direct-upload circuit breaker is per session, not per page load: a
+    // bucket CORS policy fixed between sessions should take effect on the next
+    // upload rather than requiring a refresh.
+    resetTransport();
 
     uploadedPhotosRef.current = [];
     originalsQueueRef.current = {};

@@ -20,6 +20,7 @@ Image.MAX_IMAGE_PIXELS = 50_000_000
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -28,8 +29,16 @@ from app.config import (
     MAX_PHOTOS_PER_SESSION, INGEST_CHUNK_SIZE,
     STORAGE, storage_key, MAX_BYTES_PER_SESSION, GLOBAL_DISK_WATERMARK,
     FILTER_WORKERS, JOB_CONCURRENCY, POOL_KIND,
-    PHOTO_CACHE_SIZE, JOB_CACHE_SIZE, CACHE_TTL_SECONDS
+    PHOTO_CACHE_SIZE, JOB_CACHE_SIZE, CACHE_TTL_SECONDS,
+    MAX_FILE_SIZE, SCRATCH_DIR, DIRECT_UPLOAD_ENABLED,
+    PRESIGN_TTL, MEDIA_GET_TTL, PRESIGN_RATE_PER_MIN,
 )
+from app.storage.keys import StorageUnsupported, validate_key
+from app.storage.objcache import ScratchDir
+from app.upload_policy import (
+    RateLimiter, ext_and_type_for, resolve_content_type, valid_identifier,
+)
+from urllib.parse import quote
 from app.schemas.photobook import (
     PhotoMeta, GenerateVariationsRequest, GenerateVariationsResponse, JobStatusResponse, SpreadPair, PhotobookVariation
 )
@@ -57,6 +66,13 @@ CPU_WORKER_POOL = (
     else ThreadPoolExecutor(max_workers=FILTER_WORKERS, thread_name_prefix="pixovo-cpu")
 )
 
+# Separate pool for storage I/O. Deliberately NOT CPU_WORKER_POOL: this work is
+# network-bound rather than CPU-bound, and CPU_WORKER_POOL may be a
+# ProcessPoolExecutor, which would have to pickle STORAGE (it holds a boto3
+# client — not picklable). Small, because it exists to overlap transfers with
+# the filter pass, not to add concurrency the remote endpoint will throttle.
+IO_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="pixovo-io")
+
 app = FastAPI(
     title="Pixovo Template Engine (PTE)",
     description="High-Scale Fail-Safe Story Mode Photobook Engine",
@@ -80,8 +96,47 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
-app.mount("/exports", StaticFiles(directory=str(EXPORTS_DIR)), name="exports")
+# Media access. Both branches serve the SAME URL shape — "/uploads/{key}" — so
+# nothing persisted (photos.url, jobs.variations_json, the SPA's React tree) can
+# tell the two modes apart, and switching modes needs no data migration.
+#
+# In S3 mode the bucket blocks public access, so the route mints a short-lived
+# presigned GET per request and redirects to it. The signature therefore never
+# reaches the database, which is the whole point: photo URLs are read back out
+# of jobs.variations_json by the reshuffle path long after any signature would
+# have expired.
+if STORAGE.supports_presigned_get:
+
+    @app.get("/uploads/{key:path}")
+    def media(key: str):
+        try:
+            validate_key(key)
+        except ValueError:
+            # Same guard the storage backends apply. Without it this route is a
+            # read primitive over the whole bucket.
+            raise HTTPException(status_code=400, detail="Bad media key")
+        # One HEAD per image view, which doubles the request count against
+        # storage on a cold page load (~40 thumbnails). Kept because the
+        # alternative is redirecting to a signed URL for an object that is not
+        # there, which surfaces as an opaque S3 XML error the client cannot
+        # distinguish from a permissions problem. The redirect is cached for
+        # half the signature TTL, so repeat views cost nothing.
+        if not STORAGE.exists(key):
+            raise HTTPException(status_code=404, detail="Not found")
+        return RedirectResponse(
+            STORAGE.presigned_get_url(key, expires_in=MEDIA_GET_TTL),
+            status_code=307,
+            # Half the TTL, so a cached redirect can never outlive its signature.
+            headers={"Cache-Control": f"private, max-age={MEDIA_GET_TTL // 2}"},
+        )
+
+    @app.get("/exports/{name:path}")
+    def export_media(name: str):
+        return media(f"exports/{name}")
+
+else:
+    app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
+    app.mount("/exports", StaticFiles(directory=str(EXPORTS_DIR)), name="exports")
 
 # Bounded in-memory working caches over the SQLite source of truth.
 #
@@ -97,7 +152,8 @@ PHOTO_STORE: TTLCache = TTLCache(maxsize=PHOTO_CACHE_SIZE, ttl=CACHE_TTL_SECONDS
 JOBS_STORE: TTLCache = TTLCache(maxsize=JOB_CACHE_SIZE, ttl=CACHE_TTL_SECONDS)
 
 CONCURRENCY_SEMAPHORE = asyncio.Semaphore(JOB_CONCURRENCY)
-MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB limit per file for High-Res original photos
+# MAX_FILE_SIZE moved to app.config: the presign path needs it, and importing it
+# from main would be circular.
 
 
 def cache_photo(photo: PhotoMeta) -> None:
@@ -302,6 +358,9 @@ async def ingest_photobook_dual_payload(
     SessionStore.touch_session(session_id)
 
     thumbnails = thumbnails or []
+    # Bound before the try so the `finally` can always test it, even if the
+    # handler raises before the staging loop is reached.
+    scratch = None
 
     if not thumbnails and (not metadata_json or metadata_json == "[]"):
         logger.warning(f"[Ingest Error] Empty payload for session {session_id} chunk {chunk_index}.")
@@ -330,7 +389,19 @@ async def ingest_photobook_dual_payload(
         #    photo. That made every capture time identical and silently disabled
         #    both the filter engine's internal event clustering and the 45-minute
         #    chapter rule.
+        #    S3 direct upload: the order here is now stage-locally -> stamp mtime
+        #    -> filter -> upload, rather than write-through-storage then read
+        #    back. The read-back existed only to get a local path to os.utime
+        #    and to hand to the filter engine; against a remote backend that is
+        #    an upload AND a download per photo, 80 round trips per 40-photo
+        #    chunk, on the request path. Staging first keeps the mtime stamp
+        #    exactly as load-bearing as it was (LocalDiskBackend.put_path uses
+        #    copy2, so the stored file's mtime is preserved in local mode too)
+        #    and lets the uploads overlap the CPU-bound filter pass.
+        #    The scratch directory is removed in this handler's `finally`.
+        scratch = ScratchDir(SCRATCH_DIR, prefix=f"ingest-{session_id}-")
         saved_thumb_paths = []
+        staged: List[tuple] = []   # (storage key, local staged path)
         for thumb_file in thumbnails:
             thumb_filename = Path(thumb_file.filename or "").name
             if not thumb_filename:
@@ -338,10 +409,10 @@ async def ingest_photobook_dual_payload(
                 continue
 
             key = storage_key("thumbnails", session_id, thumb_filename)
-            STORAGE.put_stream(key, thumb_file.file)
-            target_path = STORAGE.get_path(key)
-            if not target_path:
-                logger.error(f"[Ingest] Thumbnail vanished after write: {key}")
+            try:
+                target_path = scratch.write(thumb_file.file, thumb_filename)
+            except OSError as e:
+                logger.error(f"[Ingest] Could not stage thumbnail {thumb_filename}: {e}")
                 continue
 
             stem = Path(thumb_filename).stem
@@ -353,6 +424,7 @@ async def ingest_photobook_dual_payload(
                 except (OSError, ValueError, TypeError) as e:
                     logger.debug(f"[Ingest] Could not set mtime for {thumb_filename}: {e}")
 
+            staged.append((key, target_path))
             saved_thumb_paths.append(target_path)
 
         # 3. Phase 1 filtering.
@@ -368,6 +440,16 @@ async def ingest_photobook_dual_payload(
         #    full-resolution original here to re-check for QR codes — synchronously,
         #    on the event loop. It is gone along with the originals payload.
         loop = asyncio.get_running_loop()
+
+        # Uploads run on IO_POOL, not CPU_WORKER_POOL: this is network-bound
+        # work, and CPU_WORKER_POOL may be a ProcessPoolExecutor, to which
+        # STORAGE is not picklable. Started before the filter fan-out so the
+        # transfer overlaps the CPU pass instead of serialising after it.
+        upload_futures = [
+            loop.run_in_executor(IO_POOL, STORAGE.put_path, key, path, "image/jpeg")
+            for key, path in staged
+        ]
+
         # Module-level `scan_photo` rather than the bound method: a
         # ProcessPoolExecutor pickles the callable, and a bound method drags the
         # engine's mediapipe/ONNX handles along with it (unpicklable ctypes
@@ -379,6 +461,11 @@ async def ingest_photobook_dual_payload(
             for idx, path in enumerate(saved_thumb_paths)
         ]
         scanned_photos = await asyncio.gather(*scan_futures)
+
+        # Surface upload failures before persisting any photo row. A photo whose
+        # thumbnail never reached storage would otherwise be saved with a URL
+        # that 404s for the rest of the session.
+        await asyncio.gather(*upload_futures)
 
         # The cross-photo half (solo-anchor safeguard, burst dedupe, DBSCAN event
         # clustering, hero ranking) is serial and cheap — no decoding, no I/O.
@@ -416,9 +503,8 @@ async def ingest_photobook_dual_payload(
                 continue
 
             orig_name = meta.get("filename", f"{p_id}.jpg")
-            web_thumb_url = STORAGE.url_for(
-                storage_key("thumbnails", session_id, f"{p_id}_thumb.jpg")
-            )
+            thumb_key = storage_key("thumbnails", session_id, f"{p_id}_thumb.jpg")
+            web_thumb_url = STORAGE.url_for(thumb_key)
 
             # Capture-time precedence (Stage 1.2).
             #
@@ -479,6 +565,14 @@ async def ingest_photobook_dual_payload(
                 shell_phash=item.get("shell_phash") or "",
                 core_phash=item.get("core_phash") or "",
                 dominant_colors=item.get("dominant_colors") or ["#2C3E50", "#ECF0F1", "#7F8C8D"],
+
+                # ----- S3 direct upload -----
+                # The thumbnail's storage key, and the client's declared size
+                # for the ORIGINAL that has not been uploaded yet. The latter is
+                # what lets the presign endpoint reserve quota for bytes it will
+                # never see, instead of discovering the overrun at confirm time.
+                thumbnail_key=thumb_key,
+                declared_bytes=int(meta.get("original_size_bytes") or 0),
             )
             cache_photo(photo_meta)
             survived_photos_meta.append(photo_meta)
@@ -523,7 +617,12 @@ async def ingest_photobook_dual_payload(
         # Attach web preview URLs to filter results
         for p in filter_result.get("all_scanned_photos", []):
             p_filename = p.get("filename", "")
-            p["web_url"] = f"/uploads/thumbnails/{session_id}/{p_filename}"
+            # Via url_for rather than a hardcoded prefix: identical output
+            # today, but it stops this from silently breaking if the media
+            # prefix ever changes.
+            p["web_url"] = STORAGE.url_for(
+                storage_key("thumbnails", session_id, p_filename)
+            ) if p_filename else ""
 
         # Explicit GC for large photo sets (avoids memory accumulation during peak 1000-photo uploads)
         if len(metadata_list) > 100:
@@ -584,6 +683,13 @@ async def ingest_photobook_dual_payload(
     except Exception as exc:
         logger.error(f"[Ingest Error] Unhandled exception during ingestion: {exc}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Ingestion server error: {str(exc)}")
+    finally:
+        # Staged thumbnails are transient in both modes: in S3 mode they have
+        # been uploaded, and in local mode put_path already copied them into the
+        # uploads tree. Leaving them would grow the scratch directory by a
+        # chunk's worth of thumbnails per request, forever.
+        if scratch is not None:
+            scratch.close()
 
 @app.get("/api/templates")
 def get_all_templates():
@@ -1061,6 +1167,330 @@ async def upload_originals(
         "synced": True
     }
 
+# ----------------------------------------------------------------------
+# Browser-direct upload: presign + confirm
+# ----------------------------------------------------------------------
+# A presigned upload goes straight from the browser to the bucket, so FastAPI
+# never sees the bytes. Everything /api/upload-originals used to enforce while
+# streaming — session validity, cross-session ownership, the per-file ceiling,
+# the per-session quota — has to be decided at presign time or verified at
+# confirm time instead. Neither endpoint ever trusts a size, a key or a content
+# type supplied by the client.
+
+_PRESIGN_LIMITER = RateLimiter(PRESIGN_RATE_PER_MIN)
+
+# Lifetime presign ceiling per session, as a multiple of MAX_PHOTOS_PER_SESSION.
+PRESIGN_LIFETIME_MULTIPLIER = 10
+
+
+class PresignRequest(BaseModel):
+    session_id: str
+    photo_id: str
+    content_type: Optional[str] = None
+    # The client's own measurement of the file it is about to upload. Used only
+    # for admission control; accounting comes from head_object at confirm.
+    declared_bytes: Optional[int] = 0
+
+
+class ConfirmRequest(BaseModel):
+    session_id: str
+    photo_id: str
+    # Accepted and logged, never trusted — the server re-reads the ETag from
+    # storage. Present so a mismatch is diagnosable.
+    etag: Optional[str] = None
+
+
+def _authorise_upload(session_id: str, photo_id: str) -> Dict[str, Any]:
+    """
+    Shared gate for presign and confirm.
+
+    Reproduces /api/upload-originals' status codes exactly — 404 unknown
+    session/photo, 410 expired, 403 cross-session. That precision matters
+    because the client treats 403/404/413 as permanent and discards the queued
+    blob; a different code for the same condition would either strand a blob
+    forever or discard one that was merely delayed.
+    """
+    if not valid_identifier(session_id) or not valid_identifier(photo_id):
+        # Cannot correspond to any stored row, and must never reach a key.
+        raise HTTPException(status_code=400, detail="Malformed session_id or photo_id.")
+
+    session_row = SessionStore.get_session(session_id)
+    if not session_row:
+        raise HTTPException(status_code=404, detail="Unknown or expired session.")
+    if session_row.get("status") == "expired":
+        raise HTTPException(status_code=410, detail="Session has expired.")
+
+    owning_session = SessionStore.get_photo_session(photo_id)
+    if owning_session is None:
+        raise HTTPException(status_code=404, detail=f"Unknown photo_id: {photo_id}")
+    if owning_session != session_id:
+        logger.warning(
+            f"[Direct Upload] Rejected cross-session access: photo {photo_id} "
+            f"belongs to {owning_session}, caller claimed {session_id}"
+        )
+        raise HTTPException(status_code=403, detail="Photo does not belong to this session.")
+
+    SessionStore.touch_session(session_id)
+    return session_row
+
+
+def _original_key_for(session_id: str, photo: PhotoMeta) -> str:
+    """
+    The one place an original's storage key is constructed.
+
+    Built entirely from the session id, the photo id and the filename recorded
+    at INGEST — never from the presign request. There is deliberately no `key`
+    parameter on the presign endpoint: accepting one would hand the caller a
+    write primitive over the whole bucket.
+    """
+    if photo.original_key:
+        return photo.original_key
+    ext, _ = ext_and_type_for(photo.filename)
+    key = storage_key("originals", session_id, f"{photo.id}_orig{ext}")
+    # Belt and braces: the S3 backend has no filesystem to resolve against, so
+    # this syntactic check is its only traversal guard.
+    return validate_key(key)
+
+
+@app.post("/api/uploads/presign")
+def presign_original_upload(req: PresignRequest):
+    """
+    Negotiate how the client should upload one original.
+
+    Answers `mode: "proxy"` — pointing at the existing /api/upload-originals —
+    whenever direct upload is disabled or the backend cannot presign. That makes
+    the client's code path single: it always asks, then does what it is told.
+    It is also the instant rollback, since flipping PIXOVO_DIRECT_UPLOAD=0
+    returns every client to the proxy path on its next request.
+    """
+    session_row = _authorise_upload(req.session_id, req.photo_id)
+
+    proxy_response = {
+        "mode": "proxy",
+        "url": (
+            f"/api/upload-originals?session_id={quote(req.session_id)}"
+            f"&photo_id={quote(req.photo_id)}"
+        ),
+        "key": None,
+        "expires_in": 0,
+        "max_bytes": MAX_FILE_SIZE,
+        "fields": {},
+        "headers": {},
+        "confirm_required": False,
+    }
+
+    photo = SessionStore.get_photo(req.photo_id)
+    if photo is None:
+        raise HTTPException(status_code=404, detail=f"Unknown photo_id: {req.photo_id}")
+
+    declared = int(req.declared_bytes or photo.declared_bytes or 0)
+
+    # Checked before the mode branch, because it is true regardless of how the
+    # bytes would travel. Proxy mode enforces the same ceiling mid-copy, but
+    # only after the client has spent the whole upload — and the client's
+    # response to a 413 is to discard the file either way, so telling it now is
+    # strictly better.
+    if declared > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds the {MAX_FILE_SIZE // (1024 * 1024)}MB per-photo limit.",
+        )
+
+    if not DIRECT_UPLOAD_ENABLED or not STORAGE.supports_presigned_upload:
+        return proxy_response
+
+    if not _PRESIGN_LIMITER.allow(req.session_id):
+        logger.warning(f"[Presign] Rate limited session {req.session_id}")
+        raise HTTPException(
+            status_code=429,
+            detail="Too many upload requests; slow down and retry.",
+        )
+
+    # A durable ceiling as well as the per-minute window, because the in-process
+    # limiter resets on restart and is per-worker.
+    #
+    # Sized generously on purpose. The rate limiter above is the real abuse
+    # control; this only has to stop an unbounded slow drip. Every retry
+    # re-presigns (a presigned URL is never reused after a failure), so a flaky
+    # mobile connection legitimately needs several per photo — and the cost of
+    # being wrong is that a real user's remaining originals never upload and
+    # their PDF export stays blocked. A presign is a DB read plus an HMAC with
+    # no S3 call, so the headroom is close to free.
+    presign_count = SessionStore.bump_presign_count(req.session_id)
+    if presign_count > MAX_PHOTOS_PER_SESSION * PRESIGN_LIFETIME_MULTIPLIER:
+        logger.warning(
+            f"[Presign] Session {req.session_id} exceeded its lifetime presign "
+            f"ceiling ({presign_count} > "
+            f"{MAX_PHOTOS_PER_SESSION * PRESIGN_LIFETIME_MULTIPLIER})"
+        )
+        raise HTTPException(status_code=429, detail="Upload request limit reached for this session.")
+
+    content_type = resolve_content_type(req.content_type, photo.filename)
+    if content_type is None:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported content type: {req.content_type!r}",
+        )
+
+    # Admission control against the per-session quota. The server will not see
+    # these bytes, so confirmed usage alone is not enough: without counting the
+    # in-flight reservations, 150 concurrent presigns all pass a check that each
+    # of them then invalidates. A client can under-declare, and confirm's
+    # head_object remains the authority — this bounds the overshoot rather than
+    # eliminating it.
+    used_bytes = int(session_row.get("total_bytes") or 0)
+    reserved = SessionStore.reserved_bytes(req.session_id)
+    if used_bytes + reserved + declared > MAX_BYTES_PER_SESSION:
+        logger.warning(
+            f"[Presign] Session {req.session_id} at capacity: "
+            f"{used_bytes} confirmed + {reserved} reserved + {declared} requested "
+            f"> {MAX_BYTES_PER_SESSION}"
+        )
+        raise HTTPException(
+            status_code=413,
+            detail=f"Session storage limit reached ({MAX_BYTES_PER_SESSION // 1024**3} GB).",
+        )
+
+    key = _original_key_for(req.session_id, photo)
+    presigned = STORAGE.presigned_upload(
+        key,
+        content_type=content_type,
+        max_bytes=MAX_FILE_SIZE,
+        expires_in=PRESIGN_TTL,
+    )
+    SessionStore.mark_presigned(req.photo_id, declared)
+
+    # Key and session, never the signature: this is the audit trail for "who
+    # wrote this object", and the signature is a live credential.
+    logger.info(
+        f"[Presign] {presigned.mode} for {req.photo_id} in {req.session_id} "
+        f"-> {key} ({content_type}, declared {declared / 1024**2:.2f}MB)"
+    )
+
+    return {
+        "mode": presigned.mode,
+        "url": presigned.url,
+        "key": presigned.key,
+        "expires_in": presigned.expires_in,
+        "max_bytes": presigned.max_bytes,
+        "fields": presigned.fields,
+        "headers": presigned.headers,
+        "confirm_required": True,
+        # Tells the client whether storage itself will reject an oversize body,
+        # or whether it has to rely on the local pre-check plus confirm.
+        "size_enforced": STORAGE.enforces_upload_size,
+    }
+
+
+@app.post("/api/uploads/confirm")
+def confirm_original_upload(req: ConfirmRequest):
+    """
+    Verify a direct upload actually landed, then account for it.
+
+    The authority is head_object, never the request body: a client that calls
+    confirm without having uploaded anything gets a 409 and no database change,
+    so `original_synced` stays 0 and the PDF export gate keeps blocking. S3 has
+    been strongly read-after-write consistent since 2020, so a head immediately
+    after a successful PUT is reliable.
+
+    Idempotent by design. The client calls this on reconnect, on the `online`
+    event and on every resume, and the update is a no-op once the recorded byte
+    count already matches — which is what stops a retry from adding the same
+    file's size to the session total again.
+    """
+    _authorise_upload(req.session_id, req.photo_id)
+
+    photo = SessionStore.get_photo(req.photo_id)
+    if photo is None:
+        raise HTTPException(status_code=404, detail=f"Unknown photo_id: {req.photo_id}")
+
+    key = _original_key_for(req.session_id, photo)
+
+    try:
+        info = STORAGE.head(key)
+    except StorageUnsupported:
+        # Confirm is meaningless without head(); the proxy path accounts for
+        # its own bytes inline.
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "confirm_unsupported", "message": "This backend cannot verify uploads."},
+        )
+
+    if info is None or info.size == 0:
+        logger.warning(
+            f"[Confirm] No object at {key} for {req.photo_id} — upload did not land."
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "object_missing", "key_checked": key},
+        )
+
+    if info.size > MAX_FILE_SIZE:
+        # Reachable when presign_mode is "put", which cannot carry a
+        # content-length-range. Delete rather than leave an oversize object
+        # billing and unreferenced.
+        logger.warning(
+            f"[Confirm] Oversize object at {key}: {info.size} > {MAX_FILE_SIZE}; deleting."
+        )
+        STORAGE.delete(key)
+        raise HTTPException(
+            status_code=413,
+            detail={"error": "too_large", "size": info.size, "limit": MAX_FILE_SIZE},
+        )
+
+    session_row = SessionStore.get_session(req.session_id) or {}
+    already_counted = SessionStore.get_original_bytes(req.photo_id)
+    delta = info.size - already_counted
+    used_bytes = int(session_row.get("total_bytes") or 0)
+    if delta > 0 and used_bytes + delta > MAX_BYTES_PER_SESSION:
+        logger.warning(
+            f"[Confirm] Session {req.session_id} over quota; deleting {key}."
+        )
+        STORAGE.delete(key)
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "error": "session_cap",
+                "message": f"Session storage limit reached ({MAX_BYTES_PER_SESSION // 1024**3} GB).",
+            },
+        )
+
+    original_url = STORAGE.url_for(key)
+    counted = SessionStore.mark_original_synced_verified(
+        req.photo_id, url=original_url, key=key, size=info.size, etag=info.etag
+    )
+    if counted and delta:
+        SessionStore.add_session_bytes(req.session_id, delta)
+
+    cached = get_cached_photo(req.photo_id)
+    if cached is not None:
+        cached.original_url = original_url
+        cached.original_key = key
+        cached.original_synced = True
+        cache_photo(cached)
+
+    if req.etag and info.etag and req.etag.strip('"') != info.etag:
+        logger.warning(
+            f"[Confirm] ETag mismatch for {req.photo_id}: client said "
+            f"{req.etag!r}, storage says {info.etag!r}. Trusting storage."
+        )
+
+    logger.info(
+        f"[Confirm] Verified original for {req.photo_id} in {req.session_id} "
+        f"({info.size / 1024**2:.2f}MB, {'counted' if counted else 'replay'})"
+    )
+
+    # Same response shape as /api/upload-originals, so the client's success path
+    # (drop the IndexedDB blob, mark synced, advance the counter) is unchanged.
+    return {
+        "status": "success",
+        "session_id": req.session_id,
+        "photo_id": req.photo_id,
+        "original_url": original_url,
+        "synced": True,
+    }
+
+
 def _update_job(
     job_id: str,
     progress: int,
@@ -1275,9 +1705,17 @@ def export_print_pdf(req: ExportPDFRequest):
     """
     placed_ids = collect_placed_photo_ids(req.variation)
 
+    # Loaded once and used for both the gate and the resolver's key map, rather
+    # than querying twice. Also runs under force_preview, where the keys are
+    # still the fastest way to resolve whatever originals did arrive.
+    found = {p.id: p for p in SessionStore.get_photos(placed_ids)} if placed_ids else {}
+    original_keys = {
+        pid: photo.original_key
+        for pid, photo in found.items()
+        if photo.original_key
+    }
+
     if not req.force_preview and placed_ids:
-        photos = SessionStore.get_photos(placed_ids)
-        found = {p.id: p for p in photos}
         pending = [pid for pid in placed_ids if not (found.get(pid) and found[pid].original_synced)]
 
         if pending:
@@ -1305,7 +1743,8 @@ def export_print_pdf(req: ExportPDFRequest):
             page_height_mm=req.page_height_mm,
             bleed_mm=req.bleed_mm,
             dpi=req.dpi,
-            session_id=req.session_id or ""
+            session_id=req.session_id or "",
+            original_keys=original_keys,
         )
         return result
     except Exception as e:

@@ -144,6 +144,7 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_jobs_session ON jobs(session_id)
         """)
         _ensure_photo_columns(conn)
+        _ensure_session_columns(conn)
     # NOTE: no conn.close() — the connection is thread-local and reused.
     logger.info(f"[DB] Initialized persistent SQLite database at: {DB_PATH}")
 
@@ -160,6 +161,31 @@ _PHOTO_COLUMN_MIGRATIONS = [
     ("is_event_cover_hero", "INTEGER DEFAULT 0"),
     ("tenengrad_score", "REAL"),
     ("contrast_score", "REAL"),
+    # --- S3 direct upload ---------------------------------------------------
+    # Storage keys alongside the URL columns, for SERVER-side use only: confirm
+    # verification, retention, and resolving an original without looping seven
+    # extensions. URLs are deliberately NOT derived from these — url_for() stays
+    # a durable relative path in both modes, because these same URL strings are
+    # persisted into jobs.variations_json and read back by the reshuffle path.
+    # Legacy rows get NULL, and every consumer falls back to recomputing
+    # storage_key(...) exactly as it does today, so these are an optimisation
+    # rather than a dependency.
+    ("thumbnail_key", "TEXT"),
+    ("original_key", "TEXT"),
+    # Verified via head_object at confirm time. Never the client's claim.
+    ("original_bytes", "INTEGER DEFAULT 0"),
+    ("original_etag", "TEXT"),
+    # The client's declared original size, carried in the ingest metadata. An
+    # admission hint for presign-time quota reservation only — never accounting.
+    ("declared_bytes", "INTEGER DEFAULT 0"),
+    ("presigned_at", "TIMESTAMP"),
+]
+
+# Same idempotent-ALTER treatment for `sessions`, which had no migration list
+# because nothing had been added to it since it shipped.
+_SESSION_COLUMN_MIGRATIONS = [
+    ("presign_count", "INTEGER DEFAULT 0"),
+    ("last_presign_at", "TIMESTAMP"),
 ]
 
 
@@ -172,6 +198,17 @@ def _ensure_photo_columns(conn: sqlite3.Connection) -> None:
             added.append(column)
     if added:
         logger.info(f"[DB] Migrated photos table: added {', '.join(added)}")
+
+
+def _ensure_session_columns(conn: sqlite3.Connection) -> None:
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(sessions)")}
+    added = []
+    for column, ddl in _SESSION_COLUMN_MIGRATIONS:
+        if column not in existing:
+            conn.execute(f"ALTER TABLE sessions ADD COLUMN {column} {ddl}")
+            added.append(column)
+    if added:
+        logger.info(f"[DB] Migrated sessions table: added {', '.join(added)}")
 
 
 def _row_to_photo_meta(row: sqlite3.Row) -> PhotoMeta:
@@ -216,6 +253,10 @@ def _row_to_photo_meta(row: sqlite3.Row) -> PhotoMeta:
         is_event_cover_hero=bool(opt("is_event_cover_hero", 0)),
         tenengrad_score=opt("tenengrad_score"),
         contrast_score=opt("contrast_score"),
+        # S3 direct upload — server-side keys, None on pre-migration rows.
+        thumbnail_key=opt("thumbnail_key"),
+        original_key=opt("original_key"),
+        declared_bytes=opt("declared_bytes", 0) or 0,
     )
 
 
@@ -226,8 +267,13 @@ _PHOTO_INSERT_COLUMNS = (
     "original_synced, width, height, aspect_ratio, dominant_colors_json, "
     "score, blur_score, face_count, shell_phash, core_phash, is_hero_candidate, "
     "timestamp_epoch, latitude, longitude, hero_score, layout_role, "
-    "is_event_cover_hero, tenengrad_score, contrast_score"
+    "is_event_cover_hero, tenengrad_score, contrast_score, "
+    "thumbnail_key, original_key, declared_bytes"
 )
+# NOTE: original_bytes, original_etag and presigned_at are deliberately absent.
+# They are written only by the confirm/presign UPDATEs, and this INSERT is an
+# INSERT OR REPLACE — listing them here would let a replayed ingest chunk reset
+# a verified byte count back to zero.
 _PHOTO_INSERT_PLACEHOLDERS = ", ".join(["?"] * len(_PHOTO_INSERT_COLUMNS.split(",")))
 
 
@@ -260,6 +306,9 @@ def _photo_to_row(photo: PhotoMeta, session_id: Optional[str]) -> tuple:
         1 if photo.is_event_cover_hero else 0,
         photo.tenengrad_score,
         photo.contrast_score,
+        photo.thumbnail_key,
+        photo.original_key,
+        int(photo.declared_bytes or 0),
     )
 
 
@@ -495,10 +544,112 @@ class SessionStore:
         conn = get_db_connection()
         with conn:
             conn.execute("""
-                UPDATE photos 
-                SET original_url = ?, original_synced = 1 
+                UPDATE photos
+                SET original_url = ?, original_synced = 1
                 WHERE id = ?
             """, (original_url, photo_id))
+
+    @staticmethod
+    def mark_original_synced_verified(
+        photo_id: str,
+        *,
+        url: str,
+        key: str,
+        size: int,
+        etag: Optional[str],
+    ) -> bool:
+        """
+        Record a direct-upload original whose bytes were verified by head_object.
+
+        Returns True only when the stored byte count actually changed, which is
+        what makes a replayed confirm free: the client retries aggressively (on
+        reconnect, on the `online` event, on every resume), and without this
+        guard each retry would add the file's size to sessions.total_bytes
+        again and walk a session into a spurious quota rejection.
+
+        `size` must come from storage, never from the request body.
+        """
+        conn = get_db_connection()
+        with conn:
+            cur = conn.execute("""
+                UPDATE photos
+                   SET original_url = ?, original_key = ?, original_bytes = ?,
+                       original_etag = ?, original_synced = 1
+                 WHERE id = ?
+                   AND (original_synced = 0 OR COALESCE(original_bytes, 0) <> ?)
+            """, (url, key, int(size), etag, photo_id, int(size)))
+        return cur.rowcount > 0
+
+    @staticmethod
+    def get_original_bytes(photo_id: str) -> int:
+        """Bytes already counted for this photo, so confirm can apply a delta."""
+        conn = get_db_connection()
+        cur = conn.execute(
+            "SELECT COALESCE(original_bytes, 0) AS n FROM photos WHERE id = ?",
+            (photo_id,),
+        )
+        row = cur.fetchone()
+        return int(row["n"]) if row else 0
+
+    @staticmethod
+    def mark_presigned(photo_id: str, declared_bytes: int = 0) -> None:
+        """
+        Stamp a photo as having an outstanding presigned upload.
+
+        `presigned_at` is what lets presign-time admission control see bytes
+        that are in flight but not yet confirmed, and what lets a reconciler
+        later find objects that landed in storage but whose confirm never
+        arrived.
+        """
+        conn = get_db_connection()
+        with conn:
+            conn.execute("""
+                UPDATE photos
+                   SET presigned_at = CURRENT_TIMESTAMP,
+                       declared_bytes = CASE WHEN ? > 0 THEN ?
+                                             ELSE COALESCE(declared_bytes, 0) END
+                 WHERE id = ?
+            """, (int(declared_bytes), int(declared_bytes), photo_id))
+
+    @staticmethod
+    def reserved_bytes(session_id: str) -> int:
+        """
+        Client-declared size of this session's presigned-but-unconfirmed photos.
+
+        With direct upload the server never sees the bytes, so between presign
+        and confirm the true usage is unknown. This is an admission hint only —
+        a lying client can under-declare, and confirm's head_object remains the
+        authority. It bounds the overshoot to (in-flight presigns x MAX_FILE_SIZE)
+        rather than letting 150 concurrent presigns sail past the quota.
+        """
+        conn = get_db_connection()
+        cur = conn.execute("""
+            SELECT COALESCE(SUM(declared_bytes), 0) AS n
+              FROM photos
+             WHERE session_id = ?
+               AND original_synced = 0
+               AND presigned_at IS NOT NULL
+        """, (session_id,))
+        row = cur.fetchone()
+        return int(row["n"]) if row else 0
+
+    @staticmethod
+    def bump_presign_count(session_id: str) -> int:
+        """Increment and return the session's lifetime presign count."""
+        conn = get_db_connection()
+        with conn:
+            conn.execute("""
+                UPDATE sessions
+                   SET presign_count = COALESCE(presign_count, 0) + 1,
+                       last_presign_at = CURRENT_TIMESTAMP
+                 WHERE session_id = ?
+            """, (session_id,))
+        cur = conn.execute(
+            "SELECT COALESCE(presign_count, 0) AS n FROM sessions WHERE session_id = ?",
+            (session_id,),
+        )
+        row = cur.fetchone()
+        return int(row["n"]) if row else 0
 
     @staticmethod
     def count_photos() -> int:

@@ -18,7 +18,7 @@ imagehash>=4.3.1
 
 # AI & Face Intelligence
 mediapipe>=0.10.11
-scikit-learn>=1.4.1.post1
+scikit-learn>=1.4.1.post1,<1.9
 onnxruntime>=1.17.1
 google-genai>=0.1.0
 
@@ -28,5 +28,18 @@ reportlab>=4.1.0
 # Bounded in-memory caches (Stage 1.4)
 cachetools>=5.3.0
 
+# Object Storage (S3 direct upload)
+# Only imported when PIXOVO_STORAGE=s3; the local-disk backend has no
+# dependency on it, so a local deployment never loads boto3.
+boto3>=1.34.0
+
 # Testing & Utilities
 pytest>=8.0.0
+# In-process S3 fake, so the storage contract and presign/confirm suites run
+# without credentials or a real bucket.
+moto[s3]>=5.0.0
+
+# NOTE: scikit-learn is pinned rather than floating because 1.9.x ships a
+# _libsvm_sparse binary that Windows Application Control blocks on some hosts,
+# which breaks `from sklearn.cluster import DBSCAN` and therefore every import
+# of app.main. 1.7.2 loads cleanly.

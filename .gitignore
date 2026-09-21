@@ -55,3 +55,8 @@ Thumbs.db
 # OS / Misc
 *.tmp
 *.bak
+
+# Storage scratch: staging for bytes in transit and the remote-object cache.
+# Fully regenerable; can hold gigabytes of downloaded originals.
+backend/.scratch/
+.scratch/

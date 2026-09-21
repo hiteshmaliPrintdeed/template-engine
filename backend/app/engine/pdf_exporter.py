@@ -22,7 +22,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 
 from app.config import (
     BASE_DIR, UPLOADS_DIR, UPLOADS_ORIGINALS_DIR, UPLOADS_THUMBNAILS_DIR, UPLOADS_PREVIEWS_DIR, EXPORTS_DIR, logger,
-    STORAGE, storage_key
+    STORAGE, storage_key, SCRATCH_DIR, publish_export
 )
 from app.schemas.photobook import PhotobookVariation, SpreadPair
 
@@ -35,7 +35,12 @@ def hex_to_rgb(hex_str: str) -> tuple:
         hex_clean = ''.join([c*2 for c in hex_clean])
     return tuple(int(hex_clean[i:i+2], 16) for i in (0, 2, 4))
 
-def resolve_photo_path(photo_url: str, photo_id: str = "", session_id: str = "") -> Path:
+def resolve_photo_path(
+    photo_url: str,
+    photo_id: str = "",
+    session_id: str = "",
+    original_key: str = "",
+) -> Path:
     """
     Resolves photo URL or photo ID to physical disk path with 100% HD Original priority.
     Handles session subdirectories, relative /uploads/ paths, exact files, and recursive searching.
@@ -46,6 +51,18 @@ def resolve_photo_path(photo_url: str, photo_id: str = "", session_id: str = "")
     photos — and cross-session, so a partial stem match could pull another
     session's photo into this PDF. Those paths remain only for pre-1.3 data.
     """
+    # The verified key recorded at confirm time, when there is one. One lookup
+    # instead of up to seven, which on a remote backend is up to seven HEAD
+    # requests per placed photo per export.
+    if original_key:
+        hit = STORAGE.get_path(original_key)
+        if hit:
+            return Path(hit)
+        logger.warning(
+            f"[PDF Engine] Recorded original_key {original_key!r} is not in storage; "
+            f"falling back to probing."
+        )
+
     if session_id and photo_id:
         for ext in (".jpg", ".jpeg", ".png", ".webp", ".heic", ".tif", ".tiff"):
             hit = STORAGE.get_path(storage_key("originals", session_id, f"{photo_id}_orig{ext}"))
@@ -141,13 +158,22 @@ def generate_print_pdf_engine(
     page_height_mm: float = 200.0,
     bleed_mm: float = 3.0,
     dpi: int = 300,
-    session_id: str = ""
+    session_id: str = "",
+    original_keys: Dict[str, str] = None,
 ) -> Dict[str, Any]:
     """
     Compiles 300 DPI High-Res Print PDF/X file using ReportLab Native Vector Architecture.
     Embeds original JPEG camera files untouched (/DCTDecode) with ZERO double-compression loss.
     Includes SHA-256 session metadata verification audit.
+
+    `original_keys` maps photo_id -> the storage key recorded when that photo's
+    original was verified. Supplying it turns each photo's resolution into one
+    storage lookup instead of probing seven extensions, which against a remote
+    backend is seven HEAD requests per placed photo. Optional: when it is absent
+    or a photo is missing from it, resolution falls back to probing exactly as
+    before, so pre-migration sessions still export.
     """
+    original_keys = original_keys or {}
     start_time = time.perf_counter()
     logger.info(f"[ReportLab PDF Engine] Compiling Native Vector 300 DPI PDF for: '{variation.variation_title}'")
 
@@ -165,7 +191,16 @@ def generate_print_pdf_engine(
     spread_h_pt = single_h_pt + (bleed_pt * 2.0)
 
     pdf_filename = f"print_{variation.id}_{uuid.uuid4().hex[:6]}.pdf"
-    pdf_file_path = EXPORTS_DIR / pdf_filename
+
+    # reportlab writes to a real local path, so the PDF is always BUILT in
+    # scratch and published afterwards. In local mode publish_export() is an
+    # os.replace into EXPORTS_DIR returning the same "/exports/{filename}" URL
+    # this engine has always returned, so nothing downstream can tell the
+    # difference; in S3 mode it uploads and returns a session-scoped path the
+    # export media route resolves.
+    staging_dir = Path(SCRATCH_DIR) / "exports"
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    pdf_file_path = staging_dir / pdf_filename
 
     c = rl_canvas.Canvas(str(pdf_file_path), pagesize=(spread_w_pt, spread_h_pt))
     total_slots_rendered = 0
@@ -202,7 +237,8 @@ def generate_print_pdf_engine(
 
             if slot.type == "photo" and (slot.photo_url or slot.photo_id):
                 photo_file_path = resolve_photo_path(
-                    slot.photo_url or "", slot.photo_id or "", session_id
+                    slot.photo_url or "", slot.photo_id or "", session_id,
+                    original_keys.get(slot.photo_id or "", ""),
                 )
                 try:
                     if photo_file_path.exists() and photo_file_path.is_file():
@@ -280,12 +316,14 @@ def generate_print_pdf_engine(
     c.save()
 
     elapsed_ms = (time.perf_counter() - start_time) * 1000
+    # Size read from the staging file BEFORE publishing, which moves it.
     pdf_size_mb = os.path.getsize(pdf_file_path) / (1024 * 1024)
+    pdf_url = publish_export(pdf_file_path, session_id, pdf_filename)
     logger.info(f"[ReportLab PDF Engine] Successfully compiled Lossless Direct-Stream PDF: {pdf_filename} ({pdf_size_mb:.2f}MB) in {elapsed_ms:.2f}ms | Hash: {metadata_hash}")
 
     return {
         "status": "success",
-        "pdf_url": f"/exports/{pdf_filename}",
+        "pdf_url": pdf_url,
         "filename": pdf_filename,
         "size_mb": round(pdf_size_mb, 2),
         "dpi": 300,

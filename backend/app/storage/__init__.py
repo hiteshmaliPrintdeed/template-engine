@@ -8,10 +8,19 @@ edits — which is the whole point of introducing the seam while there are only
 a handful of call sites.
 """
 
-from app.storage.base import StorageBackend
+from app.storage.base import ObjectInfo, PresignedUpload, StorageBackend
+from app.storage.keys import StorageUnsupported, validate_key
 from app.storage.local import LocalDiskBackend
 
-__all__ = ["StorageBackend", "LocalDiskBackend", "storage_key"]
+__all__ = [
+    "StorageBackend",
+    "LocalDiskBackend",
+    "ObjectInfo",
+    "PresignedUpload",
+    "StorageUnsupported",
+    "storage_key",
+    "validate_key",
+]
 
 
 def storage_key(kind: str, session_id: str, name: str) -> str:

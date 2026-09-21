@@ -24,6 +24,10 @@ _TMP_ROOT = Path(tempfile.mkdtemp(prefix="pixovo_test_"))
 os.environ.setdefault("PIXOVO_DB_PATH", str(_TMP_ROOT / "test_session.db"))
 os.environ.setdefault("PIXOVO_UPLOADS_DIR", str(_TMP_ROOT / "uploads"))
 os.environ.setdefault("PIXOVO_EXPORTS_DIR", str(_TMP_ROOT / "exports"))
+# Pin the storage backend for the whole suite. Without this a developer who has
+# PIXOVO_STORAGE=s3 exported in their shell runs every test against a real
+# bucket — writing test photos into production storage.
+os.environ.setdefault("PIXOVO_STORAGE", "local")
 
 import cv2  # noqa: E402
 import numpy as np  # noqa: E402
@@ -77,3 +81,64 @@ def make_thumbnail_bytes(seed: int = 0) -> bytes:
 @pytest.fixture
 def thumbnail_factory():
     return make_thumbnail_bytes
+
+
+@pytest.fixture
+def s3_app(tmp_path):
+    """
+    A (TestClient, backend) pair for an app constructed in S3 mode on moto.
+
+    Reimporting app.* under patched environment is necessary rather than lazy:
+    the media route is registered at import time behind
+    `if STORAGE.supports_presigned_get`, and `app.main` does
+    `from app.config import STORAGE`, which binds the name at import. A
+    monkeypatch of app.config.STORAGE after the fact changes neither.
+
+    The module table is saved and restored so the session-scoped local-mode
+    `client` fixture keeps working for every other test in the run.
+    """
+    import importlib
+    import sys
+
+    import pytest as _pytest
+
+    boto3 = _pytest.importorskip("boto3")
+    moto = _pytest.importorskip("moto")
+    from fastapi.testclient import TestClient
+
+    bucket = "pixovo-s3-app-test"
+    region = "us-east-1"
+    env_keys = (
+        "PIXOVO_STORAGE", "PIXOVO_S3_BUCKET", "PIXOVO_S3_REGION",
+        "PIXOVO_S3_STARTUP_CHECK", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+    )
+    saved_env = {k: os.environ.get(k) for k in env_keys}
+    saved_modules = {
+        name: sys.modules.pop(name)
+        for name in list(sys.modules)
+        if name == "app" or name.startswith("app.")
+    }
+
+    os.environ.update({
+        "PIXOVO_STORAGE": "s3",
+        "PIXOVO_S3_BUCKET": bucket,
+        "PIXOVO_S3_REGION": region,
+        "PIXOVO_S3_STARTUP_CHECK": "0",
+        "AWS_ACCESS_KEY_ID": "testing",
+        "AWS_SECRET_ACCESS_KEY": "testing",
+    })
+
+    try:
+        with moto.mock_aws():
+            boto3.client("s3", region_name=region).create_bucket(Bucket=bucket)
+            main = importlib.import_module("app.main")
+            yield TestClient(main.app), main.STORAGE
+    finally:
+        for name in [n for n in list(sys.modules) if n == "app" or n.startswith("app.")]:
+            sys.modules.pop(name, None)
+        sys.modules.update(saved_modules)
+        for key, value in saved_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value

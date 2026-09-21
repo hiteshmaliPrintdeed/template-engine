@@ -22,15 +22,47 @@ Before rolling out to production end-users, strip out internal development inspe
 
 ## ☁️ 2. Direct-to-S3 / Cloud Storage Optimization
 
-Eliminate server disk I/O and network bandwidth bottlenecks by switching to direct cloud storage:
+Eliminate server disk I/O and network bandwidth bottlenecks by switching to direct cloud storage.
+**Shipped — see [`docs/S3_SETUP.md`](docs/S3_SETUP.md).** Off by default
+(`PIXOVO_STORAGE=local`); enabling it is a config change, not a deploy.
 
-- [ ] **S3 / GCS Pre-Signed Upload Handshake:**
-  - Implement backend endpoint `POST /api/storage/presigned-urls` generating time-limited pre-signed PUT URLs.
-  - Update `client_downsampler.js` and `App.jsx` to upload both 512px previews and 300 DPI original print files directly from the user's browser to Amazon S3 / Google Cloud Storage.
+- [x] **S3 Pre-Signed Upload Handshake:**
+  - `POST /api/uploads/presign` + `POST /api/uploads/confirm`. Presigned **POST**
+    rather than PUT, because only a POST policy can carry a
+    `content-length-range` condition — a presigned PUT's `Content-Length` is
+    client-supplied, so signing it enforces nothing.
+  - `App.jsx` uploads 300 DPI originals browser-to-bucket via
+    `utils/uploadTransport.js`. The client does not decide how to upload, it
+    asks: presign answers `mode: "proxy"` when direct upload is off, so
+    rollback needs no client deploy.
+  - 512px thumbnails deliberately still POST to `/api/photobook/ingest` and are
+    written to the bucket by the backend. The Phase-1 filter engine has to
+    decode those bytes anyway, so routing them via the bucket would add a
+    download per photo on the request path for nothing.
 - [ ] **S3 Event-Driven Webhooks / Lambda Thumbnail Resizing (Optional):**
   - Trigger automated image validation and EXIF metadata extraction via AWS Lambda / Cloud Functions on S3 upload events.
-- [ ] **Direct S3 Previews in SpreadViewer:**
-  - Point image `src` URLs directly to AWS CloudFront / S3 CDN endpoints with caching headers rather than serving through local FastAPI `/uploads/` static mount.
+- [x] **Serving images from the bucket:**
+  - `/uploads/{key}` 307-redirects to a short-lived presigned GET; the bucket
+    stays private with Block Public Access on.
+  - `url_for()` returns the same durable `/uploads/{key}` string in both modes,
+    so **nothing persisted changes** and switching modes needs no data
+    migration. This is deliberate: those strings live in four columns of
+    `photos`, are embedded in `jobs.variations_json` by the solver, and are
+    read back out by `dsa_solver.reshuffle_single_spread_engine()` — an
+    expiring URL in any of those places would rot.
+- [ ] **CloudFront in front of the bucket:**
+  - Now a change to the media route only, since `url_for()` already returns a
+    stable relative path. No data migration required.
+- [ ] **Retention sweep (blocks unbounded bucket growth):**
+  - `StorageBackend.delete_prefix()` and `LocalObjectCache.invalidate_prefix()`
+    exist and are tested but have no production caller, and
+    `sessions.status = 'expired'` is read in two places and never written.
+    Until this lands, the bucket lifecycle rule in `docs/S3_SETUP.md` is the
+    only thing bounding growth.
+- [ ] **Orphan reconciler:**
+  - `photos.presigned_at` is recorded so a sweep can find rows with
+    `original_synced = 0 AND presigned_at < now - 15min`, `head()` the
+    deterministic key, and confirm server-side.
 
 ---
 

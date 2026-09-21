@@ -36,12 +36,22 @@ This guide explains how to install, configure, and boot the clean Pixovo system 
    ```
 
 4. *(Optional)* Configure Environment Variables:
-   Create a `.env` file in the `backend/` directory:
-   ```env
-   GEMINI_API_KEY="your_optional_gemini_api_key"
-   PORT=8000
+   ```bash
+   cp .env.example .env
    ```
-   *(Note: If `GEMINI_API_KEY` is not present, Pixovo will run seamlessly in offline/rule-based fallback mode).*
+   `backend/.env.example` documents every variable, its default and why it
+   exists. Everything is optional — an absent `.env` runs with built-in
+   defaults, and a blank value means "use the default".
+
+   The file **must** live at `backend/.env`. `app/config.py` checks there
+   first; its only fallback looks *above* the repository, so a `.env` at the
+   repo root is not read.
+
+   *(If `GEMINI_API_KEY` is absent, Pixovo runs in offline/rule-based mode —
+   a supported path, not a degraded one.)*
+
+   To put photo storage in S3 instead of on local disk, see
+   [`docs/S3_SETUP.md`](docs/S3_SETUP.md).
 
 5. Start the Backend API Server:
    ```bash
@@ -66,12 +76,30 @@ This guide explains how to install, configure, and boot the clean Pixovo system 
    npm install
    ```
 
-3. Start the Vite development server:
+3. *(Optional)* Configure Environment Variables:
+   ```bash
+   cp .env.example .env
+   ```
+   `frontend/.env.example` covers the dev-server port, the backend proxy target
+   and the allowed tunnel hostnames. All optional; defaults match the values
+   previously hardcoded in `vite.config.js`.
+
+   None of these carry the `VITE_` prefix, deliberately — Vite injects
+   `VITE_`-prefixed variables into the client bundle, so a secret placed in one
+   ships to the browser. These configure the dev server in Node only.
+
+4. Start the Vite development server:
    ```bash
    npm run dev
    ```
-   * The frontend app will be available on **`http://localhost:5173`**.
-   * The Vite server is configured with reverse proxy to automatically forward `/api`, `/uploads`, and `/exports` requests to `http://localhost:8000`.
+   * The frontend app will be available on **`http://localhost:5173`**
+     (override with `PIXOVO_DEV_PORT`).
+   * The Vite server reverse-proxies `/api`, `/uploads` and `/exports` to
+     `http://localhost:8000` (override with `PIXOVO_BACKEND_URL`). The app
+     calls the API with relative paths, so this proxy is what connects the two
+     in development — a production build has no proxy and must be served from
+     the same origin as the API, or behind a reverse proxy that maps those
+     three prefixes.
 
 ---
 

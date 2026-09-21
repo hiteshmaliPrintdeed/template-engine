@@ -50,6 +50,27 @@ class PhotoMeta(BaseModel):
     tenengrad_score: Optional[float] = None
     contrast_score: Optional[float] = None
 
+    # ------------------------------------------------------------------
+    # S3 direct upload — storage keys, for server-side use.
+    #
+    # These are NOT what the browser renders: url/preview_url/thumbnail_url stay
+    # the durable "/uploads/{key}" strings, because those same values get
+    # persisted into jobs.variations_json and read back by the reshuffle path,
+    # where an expiring signed URL would rot. Keys exist so confirm can verify
+    # an upload, retention can delete by prefix, and the PDF resolver can find
+    # an original without probing seven extensions.
+    #
+    # Legacy rows have these as None; every consumer falls back to recomputing
+    # storage_key(...), so they are an optimisation rather than a dependency.
+    # They carry no bucket name or credential, so exposing them is harmless.
+    # ------------------------------------------------------------------
+    thumbnail_key: Optional[str] = None
+    original_key: Optional[str] = None
+    # Client-declared original size, from the ingest metadata. An admission hint
+    # for presign-time quota reservation only — never accounting, which comes
+    # from head_object at confirm time.
+    declared_bytes: Optional[int] = 0
+
 class TemplateSlot(BaseModel):
     id: str
     type: str  # "photo" or "text"
