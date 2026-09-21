@@ -7,7 +7,7 @@ import SpreadViewer from './components/SpreadViewer';
 import BoilerplateInspector from './components/BoilerplateInspector';
 import SystemStatsDashboard from './components/SystemStatsDashboard';
 import PixovoClientDownsampler from './utils/client_downsampler';
-import { saveOriginalBlob, getPendingBlobs, removeOriginalBlob, sweepStaleBlobs } from './utils/indexedDB';
+import { saveOriginalBlob, getPendingBlobs, removeOriginalBlob, sweepStaleBlobs, clearAllBlobs } from './utils/indexedDB';
 import './styles/storymode.css';
 
 export default function App() {
@@ -46,6 +46,9 @@ export default function App() {
   // re-prioritise them by actual placement in the chosen variation.
   const originalsQueueRef = useRef({});
   const syncedIdsRef = useRef(new Set());
+  // Held so a session reset can stop an in-flight job poll; otherwise it keeps
+  // ticking and pushes the user back to 'preview' after the reset.
+  const pollIntervalRef = useRef(null);
 
   const persistSessionId = (id) => {
     sessionIdRef.current = id;
@@ -431,6 +434,7 @@ export default function App() {
   };
 
   const pollJobStatus = (jobId) => {
+    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`/api/jobs/${jobId}`);
@@ -461,6 +465,7 @@ export default function App() {
         console.error("Polling error:", err);
       }
     }, 500);
+    pollIntervalRef.current = interval;
   };
 
   const handleSpreadUpdate = (spreadIdx, newSpread) => {
@@ -571,6 +576,53 @@ export default function App() {
     }
   };
 
+  /**
+   * Hard reset back to the upload screen.
+   *
+   * There is otherwise no way to start a second album without reloading the
+   * tab: the session id is persisted in sessionStorage and rehydrated on
+   * mount, so a plain refresh drops the user straight back into 'chat'.
+   * Clearing the stored id, the queued originals and every derived piece of
+   * state is what actually makes step === 'upload' reachable again.
+   */
+  const handleClearSession = async () => {
+    const hasWork = uploadedCount > 0 || variations.length > 0;
+    if (hasWork && !window.confirm('Clear this session and start a new album? Uploaded photos and generated layouts will be discarded.')) {
+      return;
+    }
+
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+
+    persistSessionId(null);
+    await clearAllBlobs();
+
+    uploadedPhotosRef.current = [];
+    originalsQueueRef.current = {};
+    syncedIdsRef.current = new Set();
+
+    setUploadedPhotos([]);
+    setUploadedCount(0);
+    setIsPhotoUploadComplete(false);
+    setIngestProgress({ done: 0, total: 0, survived: 0 });
+    setSyncStatus({ synced: 0, total: 0 });
+    setVariations([]);
+    setActiveVarIdx(0);
+    setVariationSeedOffset(1);
+    setCurrentJobId(null);
+    setJobProgress(0);
+    setJobMessage('');
+    setIsLoading(false);
+    setIsExportingPDF(false);
+    setIsReshufflingVars(false);
+    setActiveMode('story');
+    setStep('upload');
+
+    console.log('[Session] Cleared; ready for a new upload.');
+  };
+
   const scrollToSpreads = () => {
     if (spreadsRef.current) {
       spreadsRef.current.scrollIntoView({ behavior: 'smooth' });
@@ -585,6 +637,8 @@ export default function App() {
         onExportPDF={step === 'preview' ? handleExportPDF : null}
         isExporting={isExportingPDF}
         syncStatus={syncStatus}
+        onClearSession={handleClearSession}
+        canClearSession={step !== 'upload' || uploadedCount > 0}
       />
 
       <main className="main-wrapper">

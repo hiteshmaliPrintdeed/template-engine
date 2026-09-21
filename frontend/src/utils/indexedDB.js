@@ -138,3 +138,24 @@ export async function removeOriginalBlob(photoId) {
     return false;
   }
 }
+
+/**
+ * Drops every queued original. Used when the user explicitly clears the
+ * session: the blobs belong to a session that no longer exists, so leaving
+ * them would make auto-resume retry uploads into a dead session.
+ */
+export async function clearAllBlobs() {
+  try {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([STORE_NAME], 'readwrite');
+      const req = transaction.objectStore(STORE_NAME).clear();
+
+      req.onsuccess = () => resolve(true);
+      req.onerror = (e) => reject(e.target.error);
+    });
+  } catch (err) {
+    console.warn('[IndexedDB] Failed to clear pending originals:', err);
+    return false;
+  }
+}

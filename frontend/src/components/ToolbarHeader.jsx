@@ -1,7 +1,7 @@
 import React from 'react';
-import { BookOpen, ShoppingBag, LayoutGrid, Sparkles, Printer, Activity } from 'lucide-react';
+import { BookOpen, ShoppingBag, LayoutGrid, Sparkles, Printer, Activity, RotateCcw } from 'lucide-react';
 
-export default function ToolbarHeader({ activeMode, setActiveMode, onExportPDF, isExporting, syncStatus }) {
+export default function ToolbarHeader({ activeMode, setActiveMode, onExportPDF, isExporting, syncStatus, onClearSession, canClearSession }) {
   return (
     <header className="toolbar-header">
       <div 
@@ -72,6 +72,18 @@ export default function ToolbarHeader({ activeMode, setActiveMode, onExportPDF, 
           >
             <Printer size={16} color="#8B5CF6" />
             <span>{isExporting ? "Compiling PDF..." : "Export 300 DPI Print PDF"}</span>
+          </button>
+        )}
+
+        {onClearSession && canClearSession && (
+          <button
+            className="btn btn-secondary"
+            onClick={onClearSession}
+            style={{ borderColor: '#FCA5A5', color: '#B91C1C' }}
+            title="Discard this session and upload a new set of photos"
+          >
+            <RotateCcw size={16} color="#EF4444" />
+            <span>Clear Session</span>
           </button>
         )}
 
