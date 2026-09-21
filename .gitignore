@@ -60,3 +60,5 @@ Thumbs.db
 # Fully regenerable; can hold gigabytes of downloaded originals.
 backend/.scratch/
 .scratch/
+
+.github/
