@@ -36,6 +36,15 @@ export default defineConfig(({ mode }) => {
     'localhost',
   ]);
 
+  // Hosts `vite preview` will answer to in production. Preview applies the same
+  // Host-header check as the dev server, so without the deployed domain here it
+  // rejects every proxied request with "Blocked request".
+  const previewHosts = splitList(env.PIXOVO_PREVIEW_ALLOWED_HOSTS, [
+    'storymode.pixovo.com',
+    'localhost',
+    '127.0.0.1',
+  ]);
+
   const corsOrigins = splitList(env.PIXOVO_DEV_CORS_ORIGINS, [
     'https://doorpost-smashing-regime.ngrok-free.dev',
     `http://localhost:${devPort}`,
@@ -69,6 +78,15 @@ export default defineConfig(({ mode }) => {
         '/uploads': proxyTarget,
         '/exports': proxyTarget,
       },
+    },
+    // `vite preview` serves the built dist/ in production. It deliberately has
+    // no proxy block: the reverse proxy in front owns the routing of /api,
+    // /uploads and /exports, so preview only ever serves static assets. Bound
+    // to loopback because nothing should reach it except that proxy.
+    preview: {
+      port: Number(env.PIXOVO_PREVIEW_PORT) || 4173,
+      host: env.PIXOVO_PREVIEW_HOST || '127.0.0.1',
+      allowedHosts: previewHosts,
     },
   };
 });

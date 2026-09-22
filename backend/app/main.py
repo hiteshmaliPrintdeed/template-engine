@@ -79,19 +79,33 @@ app = FastAPI(
     version="2.1.0"
 )
 
+# Exact-origin allowlist, comma-separated, from the environment. The previous
+# list carried a "*" entry alongside allow_credentials=True, which makes
+# Starlette echo back whatever Origin it is handed with
+# Access-Control-Allow-Credentials: true -- i.e. every origin on the internet,
+# which is the opposite of an allowlist.
+#
+# allow_credentials is False because nothing here uses cookies: session identity
+# is the opaque session_id token minted below and passed explicitly in request
+# bodies and query params. Turning it off costs nothing and removes the trap.
+#
+# In the same-origin deployment (one reverse proxy serving the SPA and mapping
+# /api, /uploads and /exports to this app) the browser never issues a preflight
+# at all, so this middleware only governs direct API-subdomain callers.
 ALLOWED_ORIGINS = [
-    "https://doorpost-smashing-regime.ngrok-free.dev",
+    origin.strip()
+    for origin in os.getenv("PIXOVO_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+] or [
     "http://localhost:5173",
     "http://localhost:3000",
     "http://127.0.0.1:5173",
-    "*"
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=r"https://.*\.ngrok-free\.dev|https://.*\.ngrok\.io",
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

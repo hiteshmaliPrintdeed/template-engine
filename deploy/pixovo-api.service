@@ -1,0 +1,32 @@
+# Install as /etc/systemd/system/pixovo-api.service
+[Unit]
+Description=Pixovo Story Mode API (FastAPI/uvicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/srv/pixovo/backend
+
+# Same file app/config.py reads, so uvicorn's host/port and the app's own
+# settings stay in one place. chmod 600 -- it holds GEMINI_API_KEY.
+EnvironmentFile=/srv/pixovo/backend/.env
+
+# run.py, not `uvicorn --workers N`. The presign rate limiter, the TTL caches
+# over SQLite and the BackgroundTasks job runner are all in-process state
+# (app/upload_policy.py:106); a second worker silently breaks all three.
+ExecStart=/srv/pixovo/backend/venv/bin/python run.py
+
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pixovo-api
+
+[Install]
+WantedBy=multi-user.target

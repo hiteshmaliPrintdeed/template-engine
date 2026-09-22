@@ -62,3 +62,7 @@ backend/.scratch/
 .scratch/
 
 .github/
+# Runtime SQLite session store (live demo state; must never be overwritten by a deploy pull)
+backend/pixovo_session.db
+backend/pixovo_session.db-shm
+backend/pixovo_session.db-wal

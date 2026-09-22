@@ -1,0 +1,28 @@
+# Install as /etc/systemd/system/pixovo-web.service
+[Unit]
+Description=Pixovo Story Mode SPA (vite preview)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/srv/pixovo/frontend
+
+# Serves the prebuilt frontend/dist/. Run `npm run build` before starting or
+# restarting this unit -- preview does not build, and it exits immediately if
+# dist/ is missing.
+EnvironmentFile=/srv/pixovo/frontend/.env
+ExecStart=/usr/bin/npm run preview
+
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pixovo-web
+
+[Install]
+WantedBy=multi-user.target
