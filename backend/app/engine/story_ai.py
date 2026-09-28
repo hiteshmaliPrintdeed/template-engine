@@ -297,7 +297,7 @@ def generate_story_theme_batch(user_prompt: str, total_photos: int = 10) -> Dict
         """
 
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.5-flash-lite',
             contents=prompt_text,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
@@ -315,7 +315,7 @@ def generate_story_theme_batch(user_prompt: str, total_photos: int = 10) -> Dict
     try:
         import google.generativeai as genai_legacy
         genai_legacy.configure(api_key=GEMINI_API_KEY)
-        model = genai_legacy.GenerativeModel('gemini-1.5-flash')
+        model = genai_legacy.GenerativeModel('gemini-3.5-flash-lite')
         
         prompt_text = f"""
         User Occasion: "{user_prompt}".
