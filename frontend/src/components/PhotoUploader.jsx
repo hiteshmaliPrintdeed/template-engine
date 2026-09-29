@@ -10,7 +10,7 @@ const MAX_PREVIEW_TILES = 60;
  * Phase 1 & Stage 2.1/2.3/2.4 Ingestion Pipeline Component:
  * - OffscreenCanvas Web Worker pool downsampling (512px thumbnails) + EXIF/GPS extraction
  * - Bounded preview grid (capped at 60 tiles with +N more indicator)
- * - Non-blocking toast notifications instead of modal alert()
+ * - Non-blocking toast notifications instead of blocking browser dialogs
  * - Explicit empty state before upload
  */
 export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
