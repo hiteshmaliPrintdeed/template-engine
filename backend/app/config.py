@@ -105,6 +105,34 @@ def _env_bool(name: str, default: bool) -> bool:
         return default
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw.strip())
+    except ValueError:
+        raise RuntimeError(
+            f"{name} must be a number, got {raw!r}. "
+            f"Leave it empty to use the default ({default})."
+        ) from None
+
+# ----------------------------------------------------------------------
+# Story AI (Gemini)
+# ----------------------------------------------------------------------
+# Per-request HTTP timeouts, enforced by the SDK itself rather than by a thread
+# wrapper -- a wrapper can report a timeout but cannot stop the call it is
+# waiting on. The book call backs the interactive chat widget, so it is short;
+# the chapter call runs inside the async generate job, which already shows a
+# progress bar, and asks for far more output.
+GEMINI_TIMEOUT_SEC = _env_float("PIXOVO_GEMINI_TIMEOUT_SEC", 8.0)
+GEMINI_CHAPTER_TIMEOUT_SEC = _env_float("PIXOVO_GEMINI_CHAPTER_TIMEOUT_SEC", 20.0)
+
+# Per-chapter captions from Gemini. Off restores book-level captions (one pool
+# per variation) without a redeploy. Has no effect when GEMINI_API_KEY is unset.
+CHAPTER_CAPTIONS_ENABLED = _env_bool("PIXOVO_CHAPTER_CAPTIONS", True)
+
 # ----------------------------------------------------------------------
 # Ingestion limits (Stage 1.1)
 # ----------------------------------------------------------------------

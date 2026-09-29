@@ -137,6 +137,21 @@ def init_db():
                 status TEXT DEFAULT 'ingesting'
             )
         """)
+        # Story content cache: validated Gemini/fallback text, keyed per session
+        # by a hash of the prompt (and, for chapter content, of the chapter
+        # structure). Replaces sessions.suggested_titles_json, a single slot per
+        # session that a changed prompt silently kept serving.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS story_content (
+                session_id TEXT NOT NULL,
+                cache_key TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                source TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (session_id, cache_key)
+            )
+        """)
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_photos_session ON photos(session_id)
         """)
@@ -179,6 +194,8 @@ _SESSION_COLUMN_MIGRATIONS = [
     ("custom_title", "TEXT"),
     ("include_text", "INTEGER DEFAULT 1"),
     ("subtitle", "TEXT"),
+    # No longer written or read: story content moved to the story_content
+    # table. Kept because SQLite can only drop a column by rebuilding the table.
     ("suggested_titles_json", "TEXT"),
 ]
 
@@ -186,6 +203,10 @@ _JOB_COLUMN_MIGRATIONS = [
     ("custom_title", "TEXT"),
     ("include_text", "INTEGER DEFAULT 1"),
     ("subtitle", "TEXT"),
+    # The prompt a job was generated from. Variation reshuffle needs it to find
+    # the job's cached story content; without it, reshuffle can only rebuild the
+    # book from job.result, which carries no captions.
+    ("user_prompt", "TEXT"),
 ]
 
 
@@ -670,42 +691,65 @@ class SessionStore:
         return cur.fetchone()["count"]
 
     @staticmethod
-    def save_title_suggestions(session_id: Optional[str], suggestions: Dict[str, Any]) -> None:
-        """Persists suggest-titles output against session_id so a session only calls AI once."""
-        if not session_id or not suggestions:
+    def put_story_content(
+        session_id: Optional[str],
+        cache_key: str,
+        kind: str,
+        payload: Dict[str, Any],
+        source: str,
+    ) -> None:
+        """
+        Caches validated story content (raw text, no display preferences) under
+        (session_id, cache_key). The key is derived from the prompt -- and, for
+        chapter content, the chapter structure -- so a session holds one entry
+        per prompt instead of a single slot that a new prompt must overwrite.
+        """
+        if not session_id:
             return
         conn = get_db_connection()
-        payload = json.dumps(suggestions)
         with conn:
             conn.execute(
                 """
-                INSERT INTO sessions (session_id, suggested_titles_json, last_accessed_at)
-                VALUES (?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(session_id) DO UPDATE SET
-                    suggested_titles_json = excluded.suggested_titles_json,
-                    last_accessed_at = CURRENT_TIMESTAMP
+                INSERT INTO story_content (session_id, cache_key, kind, payload, source)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(session_id, cache_key) DO UPDATE SET
+                    kind = excluded.kind,
+                    payload = excluded.payload,
+                    source = excluded.source,
+                    created_at = CURRENT_TIMESTAMP
                 """,
-                (session_id, payload),
+                (session_id, cache_key, kind, json.dumps(payload), source),
             )
 
     @staticmethod
-    def get_title_suggestions(session_id: Optional[str]) -> Optional[Dict[str, Any]]:
-        """Reads cached suggest-titles output for session_id, if any."""
+    def get_story_content(session_id: Optional[str], cache_key: str) -> Optional[Dict[str, Any]]:
+        """Returns {"payload": dict, "source": str} for a cached entry, or None."""
         if not session_id:
             return None
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
-            "SELECT suggested_titles_json FROM sessions WHERE session_id = ?",
-            (session_id,),
+            "SELECT payload, source FROM story_content WHERE session_id = ? AND cache_key = ?",
+            (session_id, cache_key),
         )
         row = cur.fetchone()
-        if not row or not row["suggested_titles_json"]:
+        if not row:
             return None
         try:
-            return json.loads(row["suggested_titles_json"])
-        except Exception:
+            return {"payload": json.loads(row["payload"]), "source": row["source"]}
+        except (TypeError, ValueError):
+            # A corrupt row must read as a miss, never as an exception out of a
+            # generate job: the caller regenerates and overwrites it.
             return None
+
+    @staticmethod
+    def get_job_prompt(job_id: str) -> Optional[str]:
+        """The user prompt a job was generated from, for rebuilding its content on reshuffle."""
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT user_prompt FROM jobs WHERE job_id = ?", (job_id,))
+        row = cur.fetchone()
+        return row["user_prompt"] if row else None
 
     @staticmethod
     def save_session_preferences(
@@ -790,6 +834,7 @@ class SessionStore:
         custom_title: Optional[str] = None,
         include_text: Optional[bool] = None,
         subtitle: Optional[str] = None,
+        user_prompt: Optional[str] = None,
     ) -> None:
         conn = get_db_connection()
         result_json = None
@@ -802,7 +847,7 @@ class SessionStore:
         # Preserve existing preferences on the job row if not explicitly overridden
         cur = conn.cursor()
         cur.execute(
-            "SELECT session_id, custom_title, include_text, subtitle FROM jobs WHERE job_id = ?",
+            "SELECT session_id, custom_title, include_text, subtitle, user_prompt FROM jobs WHERE job_id = ?",
             (job.job_id,),
         )
         existing = cur.fetchone()
@@ -815,13 +860,17 @@ class SessionStore:
         else:
             eff_inc = 1
         eff_sub = subtitle if subtitle is not None else (existing["subtitle"] if existing else None)
+        # Carried forward explicitly: INSERT OR REPLACE deletes and re-inserts the
+        # row, so a column left out of the statement below is reset to NULL on
+        # every progress update _update_job writes.
+        eff_prompt = user_prompt if user_prompt is not None else (existing["user_prompt"] if existing else None)
 
         with conn:
             conn.execute("""
                 INSERT OR REPLACE INTO jobs (
                     job_id, session_id, status, progress, message, variations_json, error_message,
-                    custom_title, include_text, subtitle, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    custom_title, include_text, subtitle, user_prompt, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """, (
                 job.job_id,
                 eff_session,
@@ -833,6 +882,7 @@ class SessionStore:
                 eff_title,
                 eff_inc,
                 eff_sub,
+                eff_prompt,
             ))
             if eff_session and (custom_title is not None or include_text is not None or subtitle is not None):
                 conn.execute(
