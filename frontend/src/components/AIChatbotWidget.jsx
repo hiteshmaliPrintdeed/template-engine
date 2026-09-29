@@ -12,11 +12,9 @@ import {
   Users,
   Sun,
   Calendar,
-  MapPin,
   UploadCloud,
   Plus,
-  X,
-  Edit3
+  X
 } from 'lucide-react';
 import PixovoClientDownsampler from '../utils/client_downsampler';
 import PhotoFrame from './PhotoFrame';
@@ -28,7 +26,7 @@ const OCCASION_CARDS = [
     title: 'My last trip',
     subtitle: 'Road trips, vacations & scenic adventures',
     prompt: 'My last trip',
-    gradient: 'linear-gradient(135deg, #512dcb 0%, #8678ff 55%, #fdd3ad 100%)',
+    gradient: 'linear-gradient(135deg, #c86d51 0%, #e59f71 100%)',
     Icon: Compass
   },
   {
@@ -36,7 +34,7 @@ const OCCASION_CARDS = [
     title: 'A heartfelt gift',
     subtitle: 'Celebrations, tributes & keepsakes',
     prompt: 'A heartfelt gift for someone special',
-    gradient: 'linear-gradient(135deg, #f066b4 0%, #8678ff 60%, #fdd3ad 100%)',
+    gradient: 'linear-gradient(135deg, #c46868 0%, #e69d91 100%)',
     Icon: Heart
   },
   {
@@ -44,7 +42,7 @@ const OCCASION_CARDS = [
     title: 'Family milestones',
     subtitle: 'Holidays, reunions & everyday joy',
     prompt: 'Family holiday and milestones',
-    gradient: 'linear-gradient(135deg, #512dcb 0%, #f066b4 100%)',
+    gradient: 'linear-gradient(135deg, #b87b46 0%, #e3b271 100%)',
     Icon: Users
   },
   {
@@ -52,7 +50,7 @@ const OCCASION_CARDS = [
     title: 'Wedding & love',
     subtitle: 'Ceremonies, vows & romantic memories',
     prompt: 'Wedding celebration and love story',
-    gradient: 'linear-gradient(135deg, #17012e 0%, #512dcb 55%, #f066b4 100%)',
+    gradient: 'linear-gradient(135deg, #9e6752 0%, #d89e86 100%)',
     Icon: Sparkles
   },
   {
@@ -60,7 +58,7 @@ const OCCASION_CARDS = [
     title: 'Year in review',
     subtitle: 'Highlights from a whole year together',
     prompt: 'Our year in review — favorite memories',
-    gradient: 'linear-gradient(135deg, #8678ff 0%, #f066b4 60%, #fdd3ad 100%)',
+    gradient: 'linear-gradient(135deg, #627a64 0%, #9ab398 100%)',
     Icon: Calendar
   },
   {
@@ -68,7 +66,7 @@ const OCCASION_CARDS = [
     title: 'Weekend getaway',
     subtitle: 'Short escapes with friends & family',
     prompt: 'Weekend getaway adventure',
-    gradient: 'linear-gradient(135deg, #3f20a8 0%, #8678ff 100%)',
+    gradient: 'linear-gradient(135deg, #cf7e53 0%, #eeb980 100%)',
     Icon: Sun
   }
 ];
@@ -159,19 +157,24 @@ export default function AIChatbotWidget({
   const generateContextualReply = (text, currentTurnCount) => {
     const lower = text.toLowerCase();
     if (currentTurnCount === 0) {
-      if (lower.includes('trip') || lower.includes('vacation') || lower.includes('travel') || lower.includes('getaway')) {
+      if (
+        lower.includes('trip') ||
+        lower.includes('vacation') ||
+        lower.includes('travel') ||
+        lower.includes('getaway')
+      ) {
         return "I'd love to help you capture that journey! Where did you travel, who joined you, and what were your favorite moments?";
       }
       if (lower.includes('gift') || lower.includes('heartfelt')) {
-        return "A custom photo book makes an unforgettable gift. Who is this book for, and what memories or message are you celebrating?";
+        return 'A custom photo book makes an unforgettable keepsake. Who is this book for, and what memories or message are you celebrating?';
       }
       if (lower.includes('wedding') || lower.includes('love')) {
-        return "Congratulations! Tell me about the celebration — the venue, the atmosphere, or the moments that meant the most.";
+        return 'Congratulations! Tell me about the celebration — the setting, the atmosphere, or the moments that meant the most.';
       }
       if (lower.includes('family') || lower.includes('milestone')) {
-        return "Family stories are timeless. Which milestones, traditions, or everyday moments are we bringing together in this book?";
+        return 'Family stories are timeless. Which milestones, traditions, or everyday moments are we bringing together in this book?';
       }
-      return "That sounds like a wonderful story! Tell me a little more — who was there, where did it take place, or what mood should the book have?";
+      return 'That sounds like a wonderful story! Tell me a little more — who was there, where did it take place, or what mood should the book have?';
     }
     return "Got it — I've woven those details into your story direction. You can keep adding notes below, manage your photos, or tap 'Start creating my book' whenever you're ready.";
   };
@@ -249,7 +252,7 @@ export default function AIChatbotWidget({
         {
           id: `a-photos-${Date.now() + 1}`,
           role: 'ai',
-          text: "Awesome! While your photos are uploading, tell me a little about the story behind them — what's the occasion or mood?"
+          text: "Wonderful! While your photos are being curated, tell me a little about the story behind them — what's the occasion or mood?"
         }
       ]);
     }
@@ -394,7 +397,7 @@ export default function AIChatbotWidget({
     });
   };
 
-  // Calculate inline upload numbers for Mixbook strip
+  // Calculate inline upload numbers for Story Mode strip
   const totalCount = isDownsampling
     ? downsampleStats.total
     : uploadedCount || reconciledPhotos.length;
@@ -403,9 +406,13 @@ export default function AIChatbotWidget({
     : isPhotoUploadComplete
     ? totalCount
     : ingestProgress.received || 0;
-  const survivedCount = ingestProgress.survived || reconciledPhotos.filter((p) => p.status !== 'rejected').length;
+  const survivedCount =
+    ingestProgress.survived ||
+    reconciledPhotos.filter((p) => p.status !== 'rejected').length;
   const uploadPct =
-    totalCount > 0 ? Math.min(100, Math.round((completedCount / Math.max(1, totalCount)) * 100)) : 0;
+    totalCount > 0
+      ? Math.min(100, Math.round((completedCount / Math.max(1, totalCount)) * 100))
+      : 0;
 
   const inlineStripThumbs = reconciledPhotos.slice(0, 8);
   const shimmerPlaceholderCount =
@@ -433,34 +440,38 @@ export default function AIChatbotWidget({
       />
 
       {/* =================================================================
-          SCREEN 1: MIXBOOK STORY MODE WELCOME (Before Prompt or Photos)
+          SCREEN 1: WARM STORY MODE WELCOME (Before Prompt or Photos)
           ================================================================= */}
       {!hasStartedStory && (
         <>
           <div className="mx-welcome-hero">
-            <span className="mx-welcome-eyebrow">Welcome to Story Mode</span>
+            <span className="mx-welcome-eyebrow">
+              <Sparkles size={13} strokeWidth={2.2} />
+              <span>Welcome to Story Mode</span>
+            </span>
             <h1 className="mx-welcome-title">What book are you creating today?</h1>
             <p className="mx-welcome-subtitle">
-              Choose an occasion below, tell us in your own words, or add your photos right away.
+              Pick a story theme below, describe your memories in your own words, or drop your photos right in.
             </p>
           </div>
 
           <div className="mx-occasion-dock-section">
             <div className="mx-occasion-grid">
-              {OCCASION_CARDS.map((card) => {
+              {OCCASION_CARDS.map((card, idx) => {
                 const IconComponent = card.Icon;
+                const staggerClass = `warm-stagger-${Math.min(6, idx + 1)}`;
                 return (
                   <button
                     key={card.id}
                     type="button"
-                    className="mx-occasion-card"
+                    className={`mx-occasion-card ${staggerClass}`}
                     onClick={() => handleStartWithOccasion(card)}
                   >
                     <div
                       className="mx-occasion-thumb"
                       style={{ background: card.gradient }}
                     >
-                      <IconComponent size={24} strokeWidth={1.85} color="#ffffff" />
+                      <IconComponent size={23} strokeWidth={1.9} color="#ffffff" />
                     </div>
                     <div className="mx-occasion-card-body">
                       <span className="mx-occasion-card-title">{card.title}</span>
@@ -470,12 +481,61 @@ export default function AIChatbotWidget({
                 );
               })}
             </div>
+
+            {/* Warm Quick-Upload Banner right below Occasion Cards */}
+            <div
+              className="mx-inline-upload-card warm-stagger-6"
+              onClick={triggerFilePicker}
+              style={{
+                marginTop: '0.95rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '1rem',
+                flexWrap: 'wrap',
+                background: dragActive ? 'var(--px-brand-iris-subtle)' : 'rgba(255, 253, 249, 0.94)',
+                borderStyle: dragActive ? 'solid' : 'dashed',
+                borderColor: dragActive ? 'var(--px-brand-iris)' : 'var(--px-brand-iris-border)'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                <div
+                  style={{
+                    width: '42px',
+                    height: '42px',
+                    borderRadius: '12px',
+                    background: 'var(--px-brand-iris-subtle)',
+                    border: '1px solid var(--px-brand-iris-border)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0
+                  }}
+                >
+                  <UploadCloud size={20} color="var(--px-brand-iris)" strokeWidth={1.9} />
+                </div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--px-text-primary)' }}>
+                    Have your photos ready? Start by selecting or dropping them here
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--px-text-muted)' }}>
+                    Supports 20 to 1,000 photos • Smart blur &amp; duplicate filtering
+                  </div>
+                </div>
+              </div>
+
+              <span className="mx-chip-btn" style={{ color: 'var(--px-brand-iris)', borderColor: 'var(--px-brand-iris-border)' }}>
+                <Plus size={14} style={{ marginRight: '4px' }} />
+                Select Photos
+              </span>
+            </div>
           </div>
         </>
       )}
 
       {/* =================================================================
-          SCREEN 2: MIXBOOK CONVERSATIONAL THREAD + INLINE UPLOAD & STYLE
+          SCREEN 2: CONVERSATIONAL THREAD + INLINE UPLOAD & STYLE
           ================================================================= */}
       {hasStartedStory && (
         <div className="mx-chat-thread">
@@ -492,7 +552,7 @@ export default function AIChatbotWidget({
               <div key={msg.id || idx} className="mx-ai-turn">
                 <span className="mx-ai-badge">
                   <Sparkles size={12} strokeWidth={2.2} />
-                  Story Mode
+                  Story Companion
                 </span>
                 <p className="mx-ai-text">{msg.text}</p>
 
@@ -525,14 +585,18 @@ export default function AIChatbotWidget({
             );
           })}
 
-          {/* Inline Photo Upload Turn (Mixbook Screen 2 replica) */}
+          {/* Inline Photo Upload Turn */}
           <div className="mx-ai-turn">
+            <span className="mx-ai-badge">
+              <ImageIcon size={12} strokeWidth={2.2} />
+              Photo Curation
+            </span>
             <p className="mx-ai-text">
               {totalCount === 0
                 ? "Now let's bring your photos into the story. Select up to 1,000 photos — we'll automatically filter out blurry shots and duplicates."
                 : isPhotoUploadComplete && !isDownsampling
-                ? `Great—your ${survivedCount} curated photos are ready! Tap the Photos button anytime to view or add more.`
-                : 'Great—your photos are uploading. Tap the Photos button to view and manage them.'}
+                ? `Great — your ${survivedCount} curated photos are ready! Tap Manage Photos anytime to review or add more.`
+                : 'Great — your photos are uploading and being curated. Tap Manage Photos to view them.'}
             </p>
 
             {/* State A: 0 photos uploaded yet -> Inline Dropzone Card */}
@@ -543,19 +607,19 @@ export default function AIChatbotWidget({
                 style={{
                   cursor: 'pointer',
                   borderStyle: dragActive ? 'solid' : 'dashed',
-                  borderColor: dragActive ? 'var(--mx-brand-purple)' : 'rgba(81, 45, 203, 0.28)',
+                  borderColor: dragActive ? 'var(--px-brand-iris)' : 'var(--px-brand-iris-border)',
                   textAlign: 'center',
-                  padding: '1.75rem 1.25rem'
+                  padding: '1.65rem 1.25rem'
                 }}
               >
                 <UploadCloud
                   size={34}
-                  color="var(--mx-brand-purple)"
+                  color="var(--px-brand-iris)"
                   strokeWidth={1.75}
-                  style={{ margin: '0 auto 0.6rem' }}
+                  style={{ margin: '0 auto 0.55rem' }}
                 />
-                <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--mx-deep-purple)', marginBottom: '0.25rem' }}>
-                  Tap to add photos, or drag &amp; drop here
+                <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--px-text-primary)', marginBottom: '0.25rem' }}>
+                  Tap to select photos, or drag &amp; drop here
                 </div>
                 <div style={{ fontSize: '0.84rem', color: 'var(--px-text-secondary)' }}>
                   Fast 512px client-side curation • Supports JPEG, PNG, WebP
@@ -563,21 +627,21 @@ export default function AIChatbotWidget({
               </div>
             )}
 
-            {/* State B: Photos Downsampling or Uploading/Ready -> Mixbook Inline Thumbnail Strip */}
+            {/* State B: Photos Downsampling or Uploading/Ready -> Inline Thumbnail Strip */}
             {(totalCount > 0 || isDownsampling) && (
               <div className="mx-inline-upload-card">
                 <div className="mx-inline-upload-header">
                   <span className="mx-inline-upload-title">
                     {isDownsampling ? (
                       <>
-                        <RefreshCw size={15} className="animate-spin" color="var(--mx-brand-purple)" />
+                        <RefreshCw size={15} className="animate-spin" color="var(--px-brand-iris)" />
                         <span>
                           Preparing your photos ({downsampleStats.completed}/{downsampleStats.total})...
                         </span>
                       </>
                     ) : !isPhotoUploadComplete ? (
                       <>
-                        <RefreshCw size={15} className="animate-spin" color="var(--mx-brand-purple)" />
+                        <RefreshCw size={15} className="animate-spin" color="var(--px-brand-iris)" />
                         <span>
                           Uploading your photos ({completedCount}/{totalCount})...
                         </span>
@@ -595,14 +659,14 @@ export default function AIChatbotWidget({
                   <button
                     type="button"
                     className="mx-chip-btn"
-                    style={{ padding: '0.32rem 0.75rem', fontSize: '0.78rem' }}
+                    style={{ padding: '0.35rem 0.85rem', fontSize: '0.78rem' }}
                     onClick={() => setIsPhotoModalOpen(true)}
                   >
                     Manage Photos
                   </button>
                 </div>
 
-                {/* Horizontal Square Thumbnail Strip + Mixbook Shimmer Placeholders */}
+                {/* Horizontal Square Thumbnail Strip + Warm Shimmer Placeholders */}
                 <div className="mx-inline-photo-strip">
                   {inlineStripThumbs.map((item) => (
                     <div
@@ -630,12 +694,12 @@ export default function AIChatbotWidget({
                       type="button"
                       onClick={() => setIsPhotoModalOpen(true)}
                       style={{
-                        width: '74px',
-                        height: '74px',
-                        borderRadius: '12px',
-                        border: '1px solid var(--px-border-accent)',
+                        width: '68px',
+                        height: '68px',
+                        borderRadius: '11px',
+                        border: '1px solid var(--px-brand-iris-border)',
                         background: 'var(--px-brand-iris-subtle)',
-                        color: 'var(--mx-brand-purple)',
+                        color: 'var(--px-brand-iris)',
                         fontWeight: 700,
                         fontSize: '0.84rem',
                         flexShrink: 0,
@@ -660,8 +724,12 @@ export default function AIChatbotWidget({
             )}
           </div>
 
-          {/* Turn 3: Inline Story Style, Cover Title & Mixbook "Start creating my book" CTA */}
+          {/* Turn 3: Inline Story Style, Cover Title & "Start creating my book" CTA */}
           <div className="mx-ai-turn">
+            <span className="mx-ai-badge">
+              <BookOpen size={12} strokeWidth={2.2} />
+              Editorial Styling
+            </span>
             <p className="mx-ai-text">
               How should we style your pages and cover? Choose your storytelling preference below, then tap{' '}
               <strong>Start creating my book</strong> to reveal 3 custom editions.
@@ -677,13 +745,13 @@ export default function AIChatbotWidget({
               >
                 <div className="mx-style-option-title">
                   <span style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                    <BookOpen size={16} color="var(--mx-brand-purple)" />
+                    <BookOpen size={16} color="var(--px-brand-iris)" />
                     Storytelling Captions
                   </span>
-                  {includeText && <Check size={16} strokeWidth={2.5} color="var(--mx-brand-purple)" />}
+                  {includeText && <Check size={16} strokeWidth={2.5} color="var(--px-brand-iris)" />}
                 </div>
                 <div className="mx-style-option-desc">
-                  Pairs AI-crafted chapter headers and story captions alongside your photos.
+                  Pairs AI-crafted chapter headers and warm narrative captions alongside your photos.
                 </div>
               </button>
 
@@ -695,10 +763,10 @@ export default function AIChatbotWidget({
               >
                 <div className="mx-style-option-title">
                   <span style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                    <ImageIcon size={16} color="var(--mx-brand-purple)" />
+                    <ImageIcon size={16} color="var(--px-brand-iris)" />
                     Clean Photo-Forward
                   </span>
-                  {!includeText && <Check size={16} strokeWidth={2.5} color="var(--mx-brand-purple)" />}
+                  {!includeText && <Check size={16} strokeWidth={2.5} color="var(--px-brand-iris)" />}
                 </div>
                 <div className="mx-style-option-desc">
                   Dedicates 100% of every inner spread to photography with zero text boxes.
@@ -709,10 +777,10 @@ export default function AIChatbotWidget({
             {/* Optional AI Cover Title Card */}
             <div
               style={{
-                marginTop: '0.85rem',
+                marginTop: '0.75rem',
                 background: '#ffffff',
-                border: '1px solid rgba(81, 45, 203, 0.14)',
-                borderRadius: '18px',
+                border: '1px solid var(--px-border-light)',
+                borderRadius: '16px',
                 padding: '1rem 1.15rem',
                 boxShadow: 'var(--px-shadow-sm)'
               }}
@@ -727,8 +795,17 @@ export default function AIChatbotWidget({
                   marginBottom: '0.75rem'
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontWeight: 700, fontSize: '0.9rem', color: 'var(--mx-deep-purple)' }}>
-                  <Type size={15} color="var(--mx-brand-purple)" />
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                    fontWeight: 700,
+                    fontSize: '0.9rem',
+                    color: 'var(--px-text-primary)'
+                  }}
+                >
+                  <Type size={15} color="var(--px-brand-iris)" />
                   <span>Book Cover Title</span>
                 </div>
 
@@ -741,12 +818,12 @@ export default function AIChatbotWidget({
                 >
                   {isSuggestingTitles ? (
                     <>
-                      <RefreshCw size={13} className="animate-spin" style={{ marginRight: '5px', verticalAlign: '-2px' }} />
+                      <RefreshCw size={13} className="animate-spin" style={{ marginRight: '5px' }} />
                       Suggesting...
                     </>
                   ) : (
                     <>
-                      <Sparkles size={13} color="var(--mx-brand-purple)" style={{ marginRight: '5px', verticalAlign: '-2px' }} />
+                      <Sparkles size={13} color="var(--px-brand-iris)" style={{ marginRight: '5px' }} />
                       Suggest AI Titles
                     </>
                   )}
@@ -771,7 +848,13 @@ export default function AIChatbotWidget({
                 </div>
               )}
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.65rem' }}>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                  gap: '0.65rem'
+                }}
+              >
                 <input
                   type="text"
                   className="studio-input"
@@ -794,8 +877,16 @@ export default function AIChatbotWidget({
               </div>
             </div>
 
-            {/* Mixbook Signature Aurora CTA Button */}
-            <div style={{ marginTop: '1.25rem', display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+            {/* Warm Sunlit Signature CTA Button */}
+            <div
+              style={{
+                marginTop: '1.15rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '1rem',
+                flexWrap: 'wrap'
+              }}
+            >
               <button
                 type="button"
                 className="mx-btn-story-mode"
@@ -816,7 +907,13 @@ export default function AIChatbotWidget({
               </button>
 
               {totalCount > 0 && (
-                <span style={{ fontSize: '0.82rem', color: 'var(--px-text-secondary)', fontWeight: 500 }}>
+                <span
+                  style={{
+                    fontSize: '0.82rem',
+                    color: 'var(--px-text-secondary)',
+                    fontWeight: 500
+                  }}
+                >
                   {isPhotoUploadComplete
                     ? `${survivedCount} curated photos ready`
                     : `Uploading (${completedCount}/${totalCount}) — you can tap Start anytime`}
@@ -830,7 +927,7 @@ export default function AIChatbotWidget({
       )}
 
       {/* =================================================================
-          STICKY BOTTOM MIXBOOK AURORA DOCK (Pill Input + Send + Photos)
+          STICKY BOTTOM WARM INPUT DOCK (Photos Pill + Input + Send Circle)
           ================================================================= */}
       <div className="mx-bottom-dock">
         <div className="mx-bottom-dock-inner">
@@ -846,7 +943,7 @@ export default function AIChatbotWidget({
             }}
             title="Upload or manage your book photos"
           >
-            <ImageIcon size={17} strokeWidth={2} color="var(--mx-brand-purple)" />
+            <ImageIcon size={17} strokeWidth={2} color="var(--px-brand-iris)" />
             <span>Photos</span>
             {totalCount > 0 && (
               <span className="mx-photos-count-badge">
@@ -858,11 +955,12 @@ export default function AIChatbotWidget({
           <form className="mx-input-pill-bar" onSubmit={handleSendMessage}>
             <input
               type="text"
+              className="mx-input-field"
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
               placeholder={
                 hasStartedStory
-                  ? 'Message...'
+                  ? 'Add more story details or notes...'
                   : 'Or tell us in your own words...'
               }
               disabled={isLoading}
@@ -887,7 +985,13 @@ export default function AIChatbotWidget({
           <div className="mx-modal-sheet" onClick={(e) => e.stopPropagation()}>
             <div className="mx-modal-header">
               <div>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--mx-deep-purple)' }}>
+                <h3
+                  style={{
+                    fontSize: '1.1rem',
+                    fontWeight: 700,
+                    color: 'var(--px-text-primary)'
+                  }}
+                >
                   Your Book Photos ({survivedCount} Kept / {totalCount} Total)
                 </h3>
                 <p style={{ fontSize: '0.82rem', color: 'var(--px-text-secondary)' }}>
@@ -934,7 +1038,11 @@ export default function AIChatbotWidget({
                     key={item.photo_id}
                     className={`curation-tile curation-tile-${item.status}`}
                     style={{ width: '100%', height: '96px', borderRadius: '10px' }}
-                    title={item.status === 'rejected' ? item.reject_reason || 'filtered' : item.filename}
+                    title={
+                      item.status === 'rejected'
+                        ? item.reject_reason || 'filtered'
+                        : item.filename
+                    }
                   >
                     <PhotoFrame
                       src={item.url}
@@ -944,7 +1052,9 @@ export default function AIChatbotWidget({
                       style={{ width: '100%', height: '100%', borderRadius: '10px' }}
                     />
                     {item.status === 'rejected' && (
-                      <span className="curation-reject-tag">{item.reject_reason || 'filtered'}</span>
+                      <span className="curation-reject-tag">
+                        {item.reject_reason || 'filtered'}
+                      </span>
                     )}
                   </div>
                 ))}

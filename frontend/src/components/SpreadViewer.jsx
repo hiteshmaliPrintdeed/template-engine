@@ -350,7 +350,7 @@ export default function SpreadViewer({
           ================================================================= */}
       {viewMode === 'flip' && currentFlipSpread && (
         <div className="spread-pair-container" style={{ width: '100%' }}>
-          <div className="mx-layflat-book-frame">
+          <div key={`flip-spread-${activeSpreadIdx}`} className="mx-layflat-book-frame">
             {renderSpreadCanvas(currentFlipSpread, activeSpreadIdx, true)}
           </div>
 
