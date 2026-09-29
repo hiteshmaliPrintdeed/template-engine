@@ -415,6 +415,7 @@ def _invoke_gemini_json(prompt_text: str, timeout_sec: float, kind: str) -> Dict
 
     try:
         data = json.loads(response.text or "")
+        print(f"[StoryAI] Gemini call kind={kind} returned JSON: {data}")
     except (TypeError, ValueError) as exc:
         raise _fail("invalid_json", str(exc)) from None
 
@@ -601,6 +602,7 @@ def get_book_content(
         f"[StoryAI] Book content source={source} category={content.category} "
         f"theme={content.primary_theme}" + ("" if source == "gemini" else f" | {reason}")
     )
+    print(f"[StoryAI] Book content source={source} category={content.category} theme={content.primary_theme}" + ("" if source == "gemini" else f" | {reason}"))
     return content, source
 
 

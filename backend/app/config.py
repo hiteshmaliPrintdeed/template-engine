@@ -19,6 +19,22 @@ elif ROOT_ENV.exists():
 else:
     load_dotenv()
 
+# ----------------------------------------------------------------------
+# Quiet logs (local development)
+# ----------------------------------------------------------------------
+# PIXOVO_QUIET_LOGS=1 in a local backend/.env keeps the console readable for
+# print() debugging: loguru's console drops to WARNING+ and uvicorn's
+# per-request access log goes quiet. The log files are unaffected. Off by
+# default, so servers and CI log exactly as before.
+#
+# Not covered: MediaPipe's three native lines at startup ("Created TensorFlow
+# Lite XNNPACK delegate", "Logging before InitGoogle()", "W0000 ...
+# inference_feedback_manager"). This build logs through C++ absl, which ignores
+# GLOG_minloglevel and TF_CPP_MIN_LOG_LEVEL -- both were tried and verified to
+# change nothing -- and they bypass Python entirely.
+_quiet_raw = os.environ.get("PIXOVO_QUIET_LOGS", "")
+QUIET_LOGS = _quiet_raw.strip().lower() in ("1", "true", "yes", "on")
+
 # Upload Directories (Unified Dual-Asset Pipeline: Originals vs Thumbnails)
 # [PRODUCTION SPEC]:
 # - Originals: 300 DPI Print production assets
@@ -338,13 +354,34 @@ def publish_export(staging_path: Path, session_id: str, filename: str) -> str:
 # Configure Loguru Logger for metrics, stats, and session logging
 logger.remove() # Remove default handler
 
-# 1. Console Output (Colorized DEBUG)
-logger.add(
-    sys.stdout,
-    format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level:7}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-    level="DEBUG",
-    colorize=True
-)
+_LOG_LEVELS = ("TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL", "OFF")
+
+
+def _console_log_level() -> str:
+    """
+    PIXOVO_LOG_CONSOLE_LEVEL wins when set; otherwise WARNING in quiet mode and
+    DEBUG (the long-standing default) otherwise. OFF removes the console sink.
+    Only the console is affected -- the file sinks below always record DEBUG.
+    """
+    raw = _env_str("PIXOVO_LOG_CONSOLE_LEVEL", "").upper()
+    if raw and raw not in _LOG_LEVELS:
+        raise RuntimeError(
+            f"PIXOVO_LOG_CONSOLE_LEVEL must be one of {', '.join(_LOG_LEVELS)}, got {raw!r}. "
+            f"Leave it empty for the default."
+        )
+    return raw or ("WARNING" if QUIET_LOGS else "DEBUG")
+
+
+CONSOLE_LOG_LEVEL = _console_log_level()
+
+# 1. Console Output (Colorized; DEBUG unless quieted)
+if CONSOLE_LOG_LEVEL != "OFF":
+    logger.add(
+        sys.stdout,
+        format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level:7}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+        level=CONSOLE_LOG_LEVEL,
+        colorize=True
+    )
 
 # 2. Cumulative Rotating Log File
 CUMULATIVE_LOG_FILE = LOGS_DIR / "backend_metrics.log"
@@ -362,6 +399,23 @@ logger.add(
     format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:7} | {name}:{function}:{line} - {message}",
     level="DEBUG"
 )
+
+if QUIET_LOGS:
+    import logging
+    # Uvicorn configures its loggers before importing the app -- in the --reload
+    # worker process too -- so raising the level here, at app import, sticks.
+    # Doing it in the app rather than with --no-access-log makes it work however
+    # the server is launched. uvicorn.error (startup, reloads, crashed-request
+    # tracebacks) is left alone: that is the channel that reports failures.
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    # One line, so a quiet terminal is explained rather than mysterious. Not a
+    # logger call: it is not a warning, and the console filters out anything less.
+    print(
+        f"[Pixovo] Quiet logs: console shows {CONSOLE_LOG_LEVEL}+ only. "
+        f"Full log: logs/{SESSION_LOG_FILE.name}",
+        file=sys.stderr,
+        flush=True,
+    )
 
 logger.info(f"[Config] New backend session started. Log file: logs/{SESSION_LOG_FILE.name}")
 logger.info(f"[Config] Environment loaded. GEMINI_API_KEY present: {bool(GEMINI_API_KEY)}")
