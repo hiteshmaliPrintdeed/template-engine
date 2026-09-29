@@ -5,7 +5,7 @@ Applies 20 Canonical Themes with 5 Semantic Color Roles (background, surface, pr
 Supports exact 3 persistent saved book variations & on-click spread reshuffling.
 """
 
-from typing import List, Dict, Any, Set
+from typing import List, Dict, Any, Set, Optional
 from app.schemas.photobook import (
     PhotoMeta, TemplateSlot, SinglePage, SpreadPair, PhotobookVariation
 )
@@ -29,7 +29,10 @@ VARIATION_STRATEGIES = [
 def generate_photobook_variations_engine(
     photos: List[PhotoMeta],
     ai_batch_result: Dict[str, Any],
-    variant_seed_offset: int = 0
+    variant_seed_offset: int = 0,
+    custom_title: Optional[str] = None,
+    include_text: bool = True,
+    subtitle: Optional[str] = None,
 ) -> List[PhotobookVariation]:
     """
     Generates exactly 3 distinct persistent Photobook Variations applying
@@ -61,14 +64,14 @@ def generate_photobook_variations_engine(
 
         palette = THEME_PALETTES.get(theme_name, THEME_PALETTES["Warm"])
 
-        captions = var_info.get("captions", [
+        captions = var_info.get("captions") or [
             "THE JOURNEY BEGINS AT FIRST LIGHT",
-            "BLUE SKIES OVER SACRED SPIRES",
+            "GOLDEN HORIZONS IN SOFT FOCUS",
             "TOGETHER IN THE SOFT AFTERNOON",
-            "GENTLE SPIRITS IN THE SANCTUARY",
+            "GENTLE SPIRITS IN STILLNESS",
             "A GLOWING END TO THE DAY"
-        ])
-        
+        ]
+
         family_variant = LAYOUT_FAMILIES[(var_idx + variant_seed_offset) % len(LAYOUT_FAMILIES)]
         strategy = VARIATION_STRATEGIES[var_idx % len(VARIATION_STRATEGIES)]
         spreads: List[SpreadPair] = []
@@ -79,16 +82,16 @@ def generate_photobook_variations_engine(
             ch_photos = ch.get("photos", [])
             ch_title = ch.get("chapter_title", "")
             # Stage 1.5: chunk size comes from the variation's pacing strategy.
-            # It was hardcoded to `2 if len(ch_photos) <= 4 else 3` for every
-            # variation, so all three had identical spread structure.
             chunk_size = strategy["chunk_size"]
             if len(ch_photos) <= 4:
                 chunk_size = max(2, chunk_size - 1)
             photo_chunks = cluster_photos_2tier_engine(ch_photos, chunk_size=chunk_size)
 
             for c_i, chunk in enumerate(photo_chunks):
-                # Spread caption: Chapter title on first spread of chapter, varied caption on subsequent spreads
-                if c_i == 0 and ch_title and len(macro_chapters) > 1:
+                # Stage 3.2: Gate BOTH caption branches (chapter-title and rotation) on include_text
+                if not include_text:
+                    caption = ""
+                elif c_i == 0 and ch_title and len(macro_chapters) > 1:
                     caption = ch_title.upper()
                 else:
                     caption = captions[(spread_idx - 1) % len(captions)]
@@ -105,8 +108,6 @@ def generate_photobook_variations_engine(
                 spread_idx += 1
 
         # Stage 1.5: hero-ranked, non-overlapping cover set for this variation.
-        # Was `photos[0].url` — the same upload-order photo for all three, with a
-        # sample placeholder when the list was empty.
         cover = cover_sets[var_idx] if var_idx < len(cover_sets) else {"cover_style": "SPLIT_BANNER", "cover_photos": []}
         cover_photos = cover["cover_photos"]
 
@@ -114,11 +115,8 @@ def generate_photobook_variations_engine(
             id=f"var_{var_idx + 1}",
             variation_title=var_info.get("variation_title", f"{theme_name} Style {var_idx + 1}"),
             theme_name=theme_name,
-            # These defaults were leftovers from one specific test session
-            # ("KANPUR TEMPLE VISIT" / "2025 • MEMORIES") and appeared verbatim
-            # whenever the AI batch omitted a title.
-            cover_title=var_info.get("cover_title") or "YOUR PHOTOBOOK",
-            cover_subtitle=var_info.get("cover_subtitle") or "A COLLECTION OF MEMORIES",
+            cover_title=(custom_title.upper() if custom_title else var_info.get("cover_title")) or "YOUR PHOTOBOOK",
+            cover_subtitle=subtitle or var_info.get("cover_subtitle") or "A COLLECTION OF MEMORIES",
             cover_style=cover["cover_style"],
             cover_photos=cover_photos,
             cover_image_url=cover_photos[0].url if cover_photos else "",

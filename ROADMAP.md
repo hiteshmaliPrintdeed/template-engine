@@ -102,17 +102,23 @@ Starts after M1's gates are green — [2.2](docs/plans/M2-2.2-sse-progress.md) a
 
 ---
 
-# Milestone 3 — Parked
+# Milestone 3 — Studio, Motion & Parked Work
 
-Explicitly deferred, in rough order of when it will matter.
+### Shipped in Milestone 3 ([3.1](docs/plans/M3-3.1-cleanup-declutter.md) · [3.2](docs/plans/M3-3.2-guided-story-studio.md) · [3.3](docs/plans/M3-3.3-motion-verification-cleanup.md))
+
+- **Cleanup & De-Cluttering ([Stage 3.1](docs/plans/M3-3.1-cleanup-declutter.md)):** Removed `BoilerplateInspector` and `SystemStatsDashboard` from the toolbar, deleted unused `EmotionThemeSelector.jsx`, removed duplicate spread shuffle buttons, purged hardcoded ISKCON placeholders, and enforced a zero-emoji policy across the frontend and backend.
+- **Guided Story Studio & Gemini Title Engine ([Stage 3.2](docs/plans/M3-3.2-guided-story-studio.md)):** Turned Gemini on behind `ENABLE_GEMINI_API = bool(GEMINI_API_KEY)` with a 6s timeout and single-call-per-session caching (`POST /api/chat/suggest-titles` + `SessionStore`), gated both caption sources in `solver.py` on `include_text`, and persisted content preferences across variation and spread reshuffles.
+- **Motion System, Verification & Cleanup ([Stage 3.3](docs/plans/M3-3.3-motion-verification-cleanup.md)):** Replaced the flat progress bar with a 4-stage checkpoint-bound AI Synthesis Loader, applied the `--px-*` luxury design token set, added `test_stage_3_2_studio_contract.py`, and cleaned up root-level scratch files.
+
+### Explicitly Parked
 
 **Before real user data lands.** Purge the ~380 real photos committed to git (`.git` is 152 MB; `.gitignore` covers `backend/app/uploads/` but the files predate the rule). Add access control on top of M1's session isolation — `/uploads` is a `StaticFiles` mount with **no access check at all** ([main.py:68](backend/app/main.py:68)). Drop `"*"` from CORS and the `ngrok-free.dev` regex ([main.py:47](backend/app/main.py:47)). Rate limiting via `slowapi`.
 
-**Before public launch.** Delete the three dead endpoints — `/api/curate-photos` and `/api/curate-and-generate` import a `MasterCurationPipeline` that exists nowhere and 500 on every call; `/api/upload-photos` is superseded. Gate `/api/stats`, `/api/templates`, `/api/palettes`, `/api/categories`. Remove `BoilerplateInspector` and `SystemStatsDashboard` from the toolbar; delete unused `EmotionThemeSelector.jsx`. Retention sweep with a 24-h TTL.
+**Before public launch.** Delete the three dead endpoints — `/api/curate-photos` and `/api/curate-and-generate` import a `MasterCurationPipeline` that exists nowhere and 500 on every call; `/api/upload-photos` is superseded. Gate `/api/stats`, `/api/templates`, `/api/palettes`, `/api/categories`. Retention sweep with a 24-h TTL.
 
 **When one machine stops being enough.** S3 via the [1.3](docs/plans/M1-1.3-storage-offload.md) `StorageBackend` seam. Postgres + Alembic (no migration system exists today — schema is raw `CREATE TABLE IF NOT EXISTS`). Redis + a real task queue, which is what actually permits more than one uvicorn worker. Docker, CI/CD, Sentry, health probes, backups. Kill `reload=True` in [`run.py`](backend/run.py).
 
-**Product depth.** Turn Gemini on properly (`ENABLE_GEMINI_API = False` hardcoded at [story_ai.py:208](backend/app/engine/story_ai.py:208)) using the 2-tier chapter-summary prompting already sketched in its docstring, keeping the local rules engine as a live fallback. 4–6 photo collage spreads — safe to attempt once [1.7](docs/plans/M1-1.7-load-proof.md)'s slot-invariant tests exist. Face-aware cropping: a commented-out `calculate_smart_crop_offset()` sits at [dsa_solver.py:289](backend/app/engine/dsa_solver.py:289) and the face detector already works. Streaming PDF compilation (currently buffers every page's bitmaps; 100+ page books will OOM). CMYK/ICC for commercial presses. Drag-and-drop slot swapping.
+**Product depth.** 2-tier chapter-summary prompting for 1,000-photo sessions. 4–6 photo collage spreads — safe to attempt once [1.7](docs/plans/M1-1.7-load-proof.md)'s slot-invariant tests exist. Face-aware cropping: a commented-out `calculate_smart_crop_offset()` sits at [dsa_solver.py:289](backend/app/engine/dsa_solver.py:289) and the face detector already works. Streaming PDF compilation (currently buffers every page's bitmaps; 100+ page books will OOM). CMYK/ICC for commercial presses. Drag-and-drop slot swapping.
 
 **Commerce.** User accounts, Prodigi/Gelato integration, Stripe, order tracking.
 

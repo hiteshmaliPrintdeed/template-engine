@@ -777,14 +777,14 @@ def main():
     # Interactive prompt if path is not provided via command line argument
     if not target_path:
         print("\n" + "=" * 60)
-        print("   📷 Pixovo Face Detector & Spatial Position Categorizer")
+        print("    Pixovo Face Detector & Spatial Position Categorizer")
         print("=" * 60)
         while not target_path:
-            user_input = input("\n👉 Enter image file path or folder path: ").strip()
+            user_input = input("\n Enter image file path or folder path: ").strip()
             # Clean outer quotes if user drag-and-dropped file into terminal
             target_path = user_input.strip('"').strip("'")
             if not target_path:
-                print("❌ Path cannot be empty. Please try again.")
+                print(" Path cannot be empty. Please try again.")
 
         # Default save annotated images in interactive mode
         args.save_annotated = True
@@ -801,11 +801,11 @@ def main():
             if fname.lower().endswith(valid_exts)
         ]
     else:
-        print(f"\n❌ Error: Path '{target_path}' does not exist.")
+        print(f"\n Error: Path '{target_path}' does not exist.")
         sys.exit(1)
 
     if not image_paths:
-        print(f"\n❌ No valid images found at '{target_path}'")
+        print(f"\n No valid images found at '{target_path}'")
         sys.exit(0)
 
     if args.save_annotated:
@@ -814,7 +814,7 @@ def main():
     results_summary = []
 
     for img_p in image_paths:
-        print(f"\n🔍 Processing: {os.path.basename(img_p)}")
+        print(f"\n Processing: {os.path.basename(img_p)}")
         res = detector.detect_file(img_p)
 
         print(f"  • Total Faces: {res.face_count}")
@@ -835,13 +835,13 @@ def main():
             out_filename = f"annotated_{os.path.basename(img_p)}"
             out_path = os.path.join(args.out_dir, out_filename)
             cv2.imwrite(out_path, annotated_img)
-            print(f"  📸 Saved annotated image to: {out_path}")
+            print(f"   Saved annotated image to: {out_path}")
 
     # Output JSON summary
     summary_path = os.path.join(args.out_dir if args.save_annotated else ".", "face_detection_results.json")
     with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(results_summary, f, indent=2)
-    print(f"\n✅ JSON results saved to: {os.path.abspath(summary_path)}")
+    print(f"\n JSON results saved to: {os.path.abspath(summary_path)}")
 
 
 if __name__ == "__main__":

@@ -933,7 +933,7 @@ class Phase1FilterEngine:
                     layout_groups.append({
                         "group_id": f"triptych_{p1['id']}",
                         "group_type": "BURST_TRIPTYCH_GROUP",
-                        "group_title": "⚡ 3-Frame Progressive Action Burst",
+                        "group_title": " 3-Frame Progressive Action Burst",
                         "photos": [p1, p2, p3],
                         "reason": f"3-frame progressive action pose sequence at the same location ({p1['filename']}, {p2['filename']}, {p3['filename']})"
                     })
@@ -991,7 +991,7 @@ class Phase1FilterEngine:
                 layout_groups.append({
                     "group_id": f"quad_{p1['id']}",
                     "group_type": "THEME_QUAD_GROUP",
-                    "group_title": "⚡ 4-Photo Scene Topic Group",
+                    "group_title": " 4-Photo Scene Topic Group",
                     "photos": chain,
                     "reason": "Bounded 4-photo scene topic chain at matching location"
                 })
@@ -1001,7 +1001,7 @@ class Phase1FilterEngine:
                 layout_groups.append({
                     "group_id": f"trio_{p1['id']}",
                     "group_type": "THEME_TRIPTYCH_GROUP",
-                    "group_title": "⚡ 3-Photo Scene Topic Group",
+                    "group_title": " 3-Photo Scene Topic Group",
                     "photos": chain,
                     "reason": "Bounded 3-photo scene topic chain at matching location"
                 })
@@ -1011,7 +1011,7 @@ class Phase1FilterEngine:
                 is_scenery_portrait_synergy = (chain[0].get("face_count", 0) == 0 and chain[1].get("face_count", 0) >= 1) or (chain[1].get("face_count", 0) == 0 and chain[0].get("face_count", 0) >= 1)
                 is_pure_scenery_pair = (chain[0].get("face_count", 0) == 0 and chain[1].get("face_count", 0) == 0)
 
-                group_title = "🌾 Scenery & Portrait Synergy Pair" if is_scenery_portrait_synergy else ("🌾 Scenery Anchor Pair" if is_pure_scenery_pair else "⚡ 2-Photo Companion Pair")
+                group_title = " Scenery & Portrait Synergy Pair" if is_scenery_portrait_synergy else (" Scenery Anchor Pair" if is_pure_scenery_pair else " 2-Photo Companion Pair")
                 layout_groups.append({
                     "group_id": f"pair_{p1['id']}",
                     "group_type": "COMPANION_PAIR",

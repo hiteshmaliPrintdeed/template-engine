@@ -40,14 +40,15 @@ from app.upload_policy import (
 )
 from urllib.parse import quote
 from app.schemas.photobook import (
-    PhotoMeta, GenerateVariationsRequest, GenerateVariationsResponse, JobStatusResponse, SpreadPair, PhotobookVariation
+    PhotoMeta, GenerateVariationsRequest, GenerateVariationsResponse, JobStatusResponse, SpreadPair, PhotobookVariation,
+    SuggestTitlesRequest, SuggestTitlesResponse, SingleSpreadReshuffleRequest, VariationsReshuffleRequest
 )
 import threading
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from cachetools import TTLCache
 from app.db.session_store import SessionStore
 from app.engine.color_extractor import extract_dominant_colors
-from app.engine.story_ai import generate_story_theme_batch
+from app.engine.story_ai import generate_story_theme_batch, suggest_creative_titles
 from app.engine.solver import generate_photobook_variations_engine
 from app.engine.pdf_exporter import generate_print_pdf_engine
 from app.engine.filter.filter_engine import (
@@ -732,25 +733,36 @@ def get_all_categories():
         "categories": CATEGORY_THEMES_MAP
     }
 
-class SingleSpreadReshuffleRequest(BaseModel):
-    spread: SpreadPair
-    theme_name: str
-    seed: int = 1
+@app.post("/api/chat/suggest-titles", response_model=SuggestTitlesResponse)
+def suggest_titles_endpoint(req: SuggestTitlesRequest):
+    """Proposes 4 book cover titles, 2 subtitles, category, and 4 captions, cached by session_id."""
+    t0 = time.perf_counter()
+    result = suggest_creative_titles(
+        user_prompt=req.user_prompt,
+        photo_count=req.photo_count or 0,
+        session_id=req.session_id,
+    )
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    from app.metrics import MetricsCollector
+    MetricsCollector.record("Suggest Creative Titles", elapsed_ms, {
+        "session_id": req.session_id,
+        "category": result.get("category"),
+    })
+    return SuggestTitlesResponse(**result)
 
-class VariationsReshuffleRequest(BaseModel):
-    job_id: str
-    seed_offset: int = 1
-    # Stage 1.6: required so reshuffle reloads THIS session's photos. It used to
-    # read the whole process-wide photo cache, which at 20 concurrent users
-    # meant reshuffling could pull another user's photos into your book.
-    session_id: Optional[str] = None
 
 @app.post("/api/spreads/reshuffle", response_model=SpreadPair)
 def reshuffle_single_spread(req: SingleSpreadReshuffleRequest):
-    """Reshuffles a single spread's layout on click using DSA solver engine."""
+    """Reshuffles a single spread's layout on click using DSA solver engine while honoring include_text."""
     t0 = time.perf_counter()
     from app.engine.dsa_solver import reshuffle_single_spread_engine
-    result = reshuffle_single_spread_engine(req.spread, req.theme_name, req.seed)
+    prefs = SessionStore.get_session_preferences(session_id=req.session_id)
+    result = reshuffle_single_spread_engine(
+        req.spread,
+        req.theme_name,
+        req.seed,
+        include_text=prefs["include_text"],
+    )
     elapsed_ms = (time.perf_counter() - t0) * 1000
     from app.metrics import MetricsCollector
     MetricsCollector.record("Spread Reshuffle", elapsed_ms, {
@@ -759,9 +771,10 @@ def reshuffle_single_spread(req: SingleSpreadReshuffleRequest):
     })
     return result
 
+
 @app.post("/api/variations/reshuffle")
 def reshuffle_job_variations(req: VariationsReshuffleRequest):
-    """Reshuffles themes & palettes across the 3 saved persistent variations."""
+    """Reshuffles themes & palettes across the 3 saved persistent variations, preserving Studio preferences."""
     t0 = time.perf_counter()
     job = get_cached_job(req.job_id) or SessionStore.get_job(req.job_id)
     if job is None:
@@ -772,11 +785,6 @@ def reshuffle_job_variations(req: VariationsReshuffleRequest):
     from app.engine.solver import generate_photobook_variations_engine
 
     # Stage 1.6: load THIS session's photos.
-    #
-    # This used to be `list(PHOTO_STORE.values())` — the entire process-wide
-    # cache — falling back to a single `sample_placeholder.jpg`. Two bugs in one
-    # line: a cross-session data leak (another user's photos could land in your
-    # reshuffled book) and a placeholder book when the cache was cold.
     if not req.session_id:
         raise HTTPException(
             status_code=400,
@@ -790,18 +798,41 @@ def reshuffle_job_variations(req: VariationsReshuffleRequest):
             detail="No photos found for this session. Cannot reshuffle."
         )
 
+    # Stage 3.2: read persisted content preferences (include_text, custom_title, subtitle)
+    # from SessionStore so reshuffling a Photo-Only book stays caption-free.
+    prefs = SessionStore.get_session_preferences(session_id=req.session_id, job_id=req.job_id)
+
     ai_batch_result = {
         "variations": [
-            {"variation_id": f"var_{i+1}", "variation_title": v.variation_title, "theme_name": v.theme_name, "cover_title": v.cover_title, "cover_subtitle": v.cover_subtitle}
+            {
+                "variation_id": f"var_{i+1}",
+                "variation_title": v.variation_title,
+                "theme_name": v.theme_name,
+                "cover_title": v.cover_title,
+                "cover_subtitle": v.cover_subtitle,
+            }
             for i, v in enumerate(job.result.variations)
         ]
     }
 
-    new_variations = generate_photobook_variations_engine(photos, ai_batch_result, variant_seed_offset=req.seed_offset)
+    new_variations = generate_photobook_variations_engine(
+        photos,
+        ai_batch_result,
+        variant_seed_offset=req.seed_offset,
+        custom_title=prefs["custom_title"],
+        include_text=prefs["include_text"],
+        subtitle=prefs["subtitle"],
+    )
     job.result.variations = new_variations
     # Persist, so a reshuffle survives a cache eviction or restart.
     cache_job(job)
-    SessionStore.save_job(job, session_id=req.session_id)
+    SessionStore.save_job(
+        job,
+        session_id=req.session_id,
+        custom_title=prefs["custom_title"],
+        include_text=prefs["include_text"],
+        subtitle=prefs["subtitle"],
+    )
     elapsed_ms = (time.perf_counter() - t0) * 1000
     from app.metrics import MetricsCollector
     MetricsCollector.record("Variations Reshuffle", elapsed_ms, {
@@ -1549,23 +1580,29 @@ async def process_async_job(
     photo_ids: List[str],
     user_prompt: str,
     session_id: Optional[str] = None,
+    custom_title: Optional[str] = None,
+    include_text: bool = True,
+    subtitle: Optional[str] = None,
 ):
     """
     Background worker, bounded by CONCURRENCY_SEMAPHORE.
 
-    Stage 1.4: the photo load, the theme engine and the layout solver all used
-    to run synchronously in this coroutine — directly on the event loop. For a
-    1,000-photo session the DSA solver blocks for seconds, during which the
-    server answers nobody, so one user generating stalled all twenty. Each
-    blocking stage is now handed to CPU_WORKER_POOL via run_in_executor.
-
-    The `await asyncio.sleep(0.1)` calls are gone: they existed only to let the
-    loop breathe between blocking sections, which run_in_executor makes moot.
+    Stage 1.4: the photo load, the theme engine and the layout solver all run on
+    CPU_WORKER_POOL via run_in_executor.
+    Stage 3.2: persists and threads custom_title, include_text, and subtitle.
     """
     job_start = time.perf_counter()
     logger.info(
         f"[JobWorker] Starting {job_id} | session={session_id} | "
-        f"prompt='{user_prompt}' | {len(photo_ids)} photo ids"
+        f"prompt='{user_prompt}' | {len(photo_ids)} photo ids | include_text={include_text}"
+    )
+
+    SessionStore.save_session_preferences(
+        session_id=session_id,
+        custom_title=custom_title,
+        include_text=include_text,
+        subtitle=subtitle,
+        job_id=job_id,
     )
 
     async with CONCURRENCY_SEMAPHORE:
@@ -1577,11 +1614,6 @@ async def process_async_job(
             )
             cache_photos(photos)
 
-            # Stage 1.6: fail honestly. This used to fabricate four `sample_N`
-            # placeholder photos and produce a COMPLETE fake photobook — turning
-            # a data-loss bug into a silently wrong product a user could pay to
-            # print. It also masked exactly the failures the load test exists to
-            # find.
             if not photos:
                 logger.error(
                     f"[JobWorker] {job_id} has no valid photos "
@@ -1596,12 +1628,26 @@ async def process_async_job(
 
             _update_job(job_id, 45, "Generating story themes...", session_id=session_id)
             ai_batch = await loop.run_in_executor(
-                CPU_WORKER_POOL, generate_story_theme_batch, user_prompt, len(photos)
+                CPU_WORKER_POOL,
+                generate_story_theme_batch,
+                user_prompt,
+                len(photos),
+                session_id,
+                custom_title,
+                include_text,
+                subtitle,
             )
 
             _update_job(job_id, 70, "Solving optimal layouts...", session_id=session_id)
             variations = await loop.run_in_executor(
-                CPU_WORKER_POOL, generate_photobook_variations_engine, photos, ai_batch
+                CPU_WORKER_POOL,
+                generate_photobook_variations_engine,
+                photos,
+                ai_batch,
+                0,
+                custom_title,
+                include_text,
+                subtitle,
             )
 
             if not variations:
@@ -1616,7 +1662,7 @@ async def process_async_job(
                 job_id, 100, "Photobook variations generated successfully!",
                 status_value="completed",
                 result=GenerateVariationsResponse(
-                    theme_name=ai_batch.get("primary_theme", "Devotional / Temple"),
+                    theme_name=ai_batch.get("primary_theme", "Warm"),
                     variations=variations,
                 ),
                 session_id=session_id,
@@ -1642,11 +1688,15 @@ async def process_async_job(
                 status_value="failed", session_id=session_id,
             )
 
+
 @app.post("/api/generate-async", status_code=status.HTTP_202_ACCEPTED, response_model=JobStatusResponse)
 async def generate_async(payload: GenerateVariationsRequest, background_tasks: BackgroundTasks):
     """Async endpoint returning 202 Accepted and job_id for frontend polling."""
     job_id = f"job_{uuid.uuid4().hex[:8]}"
-    logger.info(f"[API] Queuing async job {job_id} for prompt: '{payload.user_prompt}'")
+    logger.info(
+        f"[API] Queuing async job {job_id} for prompt: '{payload.user_prompt}' "
+        f"| include_text={payload.include_text} | custom_title={payload.custom_title!r}"
+    )
 
     initial_job = JobStatusResponse(
         job_id=job_id,
@@ -1656,10 +1706,23 @@ async def generate_async(payload: GenerateVariationsRequest, background_tasks: B
         result=None
     )
     cache_job(initial_job)
-    SessionStore.save_job(initial_job, session_id=payload.session_id)
+    SessionStore.save_job(
+        initial_job,
+        session_id=payload.session_id,
+        custom_title=payload.custom_title,
+        include_text=payload.include_text,
+        subtitle=payload.subtitle,
+    )
 
     background_tasks.add_task(
-        process_async_job, job_id, payload.photo_ids, payload.user_prompt, payload.session_id
+        process_async_job,
+        job_id,
+        payload.photo_ids,
+        payload.user_prompt,
+        payload.session_id,
+        payload.custom_title,
+        payload.include_text,
+        payload.subtitle,
     )
 
     return initial_job

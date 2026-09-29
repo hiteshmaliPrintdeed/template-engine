@@ -1,28 +1,69 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Sparkles, Check, Clock, RefreshCw } from 'lucide-react';
 import ToolbarHeader from './components/ToolbarHeader';
 import PhotoUploader from './components/PhotoUploader';
 import AIChatbotWidget from './components/AIChatbotWidget';
 import BookCarousel3D from './components/BookCarousel3D';
 import SpreadViewer from './components/SpreadViewer';
-import BoilerplateInspector from './components/BoilerplateInspector';
-import SystemStatsDashboard from './components/SystemStatsDashboard';
 import PixovoClientDownsampler from './utils/client_downsampler';
 import { saveOriginalBlob, getPendingBlobs, removeOriginalBlob, sweepStaleBlobs, clearAllBlobs } from './utils/indexedDB';
 import { uploadOriginal, resetTransport, Outcome } from './utils/uploadTransport';
 import './styles/storymode.css';
 
+const SYNTHESIS_STAGES = [
+  {
+    id: 1,
+    copy: 'Scanning visual balance, exposure & focal sharpness',
+    minProgress: 0,
+    completeAt: 20
+  },
+  {
+    id: 2,
+    copy: 'Curating 5-role semantic color harmonies',
+    minProgress: 20,
+    completeAt: 45
+  },
+  {
+    id: 3,
+    copy: 'DSA Solver computing golden-ratio double spread bounds',
+    minProgress: 45,
+    completeAt: 70
+  },
+  {
+    id: 4,
+    copy: 'Binding cover jacket & 300 DPI pre-flight quality check',
+    minProgress: 70,
+    completeAt: 100
+  }
+];
+
+const MICRO_FACTS = [
+  '2-Tier temporal & pHash clustering preserves chronological narrative order.',
+  'DSA Layout Solver evaluates golden-ratio double-page partitions per spread.',
+  '300 DPI pre-flight validation checks effective print resolution on every frame.',
+  'Hero cover selector guarantees non-overlapping cover photography across all 3 editions.'
+];
+
 export default function App() {
-  const [activeMode, setActiveMode] = useState('story'); // 'story' | 'inspector' | 'stats'
   const [step, setStep] = useState('upload'); // 'upload' -> 'chat' -> 'generating' -> 'preview'
   const [uploadedPhotos, setUploadedPhotos] = useState([]);
   const [isPhotoUploadComplete, setIsPhotoUploadComplete] = useState(false);
   const [uploadedCount, setUploadedCount] = useState(0);
-  const [userPrompt, setUserPrompt] = useState('Friends at ISKCON Temple');
+  const [userPrompt, setUserPrompt] = useState('');
+  const [studioPrefs, setStudioPrefs] = useState({
+    custom_title: null,
+    include_text: true,
+    subtitle: null
+  });
   const [currentJobId, setCurrentJobId] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isReshufflingVars, setIsReshufflingVars] = useState(false);
   const [jobProgress, setJobProgress] = useState(0);
+  const [jobStatus, setJobStatus] = useState('idle');
   const [jobMessage, setJobMessage] = useState('');
+  const [displayProgress, setDisplayProgress] = useState(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [factIndex, setFactIndex] = useState(0);
   const [variations, setVariations] = useState([]);
   const [activeVarIdx, setActiveVarIdx] = useState(0);
   const [variationSeedOffset, setVariationSeedOffset] = useState(1);
@@ -62,10 +103,60 @@ export default function App() {
     }
   };
 
+  // Smooth stage-bounded visual progress interpolation + live elapsed timer + micro-facts ticker
+  useEffect(() => {
+    if (step !== 'generating') {
+      setElapsedSeconds(0);
+      return;
+    }
+
+    const startTs = performance.now();
+    const timerInterval = setInterval(() => {
+      setElapsedSeconds(((performance.now() - startTs) / 1000).toFixed(1));
+    }, 100);
+
+    const factInterval = setInterval(() => {
+      setFactIndex((prev) => (prev + 1) % MICRO_FACTS.length);
+    }, 2800);
+
+    return () => {
+      clearInterval(timerInterval);
+      clearInterval(factInterval);
+    };
+  }, [step]);
+
+  // Interpolate displayProgress smoothly (min 250ms per visual tick) within the
+  // current stage's range without ever crossing the stage's upper checkpoint
+  // until real jobProgress has reached it.
+  useEffect(() => {
+    if (step !== 'generating') return;
+
+    const getCeilingForRealProgress = (realProg, status) => {
+      if (status === 'completed' && realProg >= 100) return 100;
+      if (realProg < 20) return 19;
+      if (realProg < 45) return 44;
+      if (realProg < 70) return 69;
+      return 98;
+    };
+
+    const tick = setInterval(() => {
+      setDisplayProgress((prev) => {
+        const ceiling = getCeilingForRealProgress(jobProgress, jobStatus);
+        if (prev < jobProgress) {
+          return Math.min(ceiling, Math.max(jobProgress, prev + 4));
+        }
+        if (prev < ceiling) {
+          return prev + 1;
+        }
+        return prev;
+      });
+    }, 260);
+
+    return () => clearInterval(tick);
+  }, [step, jobProgress, jobStatus]);
+
   // Rehydrate a session that survived a page refresh, so the IndexedDB
-  // auto-resume below has a session to resume *into*. Previously the session_id
-  // lived only in a local variable inside handlePhotosUploaded, so a refresh
-  // left queued HD blobs with nowhere to go.
+  // auto-resume below has a session to resume *into*.
   useEffect(() => {
     const stored = sessionIdRef.current;
     if (!stored) return;
@@ -101,8 +192,6 @@ export default function App() {
   // Auto-Resume Unsynced HD Blobs from IndexedDB on startup / reconnect
   useEffect(() => {
     async function resumePendingSync() {
-      // Evict abandoned blobs before resuming, so a stale session cannot keep
-      // gigabytes of originals in browser storage indefinitely (Stage 1.3).
       await sweepStaleBlobs();
       const pending = await getPendingBlobs();
       if (!pending || pending.length === 0) return;
@@ -112,9 +201,6 @@ export default function App() {
       let count = 0;
 
       for (const item of pending) {
-        // Each record carries the session it belongs to. A blob whose session
-        // is unknown can never be attributed, so drop it rather than retrying
-        // forever against a session the server will reject.
         const itemSession = item.sessionId || sessionIdRef.current;
         if (!itemSession) {
           console.warn(`[IndexedDB Auto-Resume] No session for ${item.photoId}; discarding orphaned blob.`);
@@ -123,9 +209,6 @@ export default function App() {
         }
 
         try {
-          // confirmFirst: the object may already be in storage from before the
-          // refresh, with only the confirm call lost. Asking costs one small
-          // request; assuming otherwise costs a full re-upload of up to 20MB.
           const outcome = await uploadOriginal({
             sessionId: itemSession,
             photoId: item.photoId,
@@ -138,11 +221,9 @@ export default function App() {
             count++;
             setSyncStatus({ synced: count, total: pending.length });
           } else if (outcome === Outcome.PERMANENT) {
-            // The server will never accept this blob — stop retrying it.
             console.warn(`[IndexedDB Auto-Resume] Discarding ${item.photoId}; server will never accept it.`);
             await removeOriginalBlob(item.photoId);
           }
-          // Outcome.RETRY: leave the blob queued for the next `online` event.
         } catch (err) {
           console.warn(`[IndexedDB Auto-Resume] Network offline, will retry later for ${item.photoId}:`, err);
         }
@@ -154,10 +235,6 @@ export default function App() {
     return () => window.removeEventListener('online', resumePendingSync);
   }, []);
 
-  /**
-   * Extracts every photo_id actually occupying a slot in a variation.
-   * These are the only originals the PDF export needs, so they upload first.
-   */
   const collectPlacedPhotoIds = (variation) => {
     if (!variation || !variation.spreads) return new Set();
     const placed = new Set();
@@ -171,11 +248,6 @@ export default function App() {
     return placed;
   };
 
-  /**
-   * Re-runs the HD upload queue with photos placed in the chosen variation
-   * first, so export becomes possible as early as possible instead of waiting
-   * for every survivor to finish uploading.
-   */
   const prioritiseOriginalsForVariation = (variation) => {
     const sid = sessionIdRef.current;
     const queue = originalsQueueRef.current;
@@ -200,7 +272,6 @@ export default function App() {
     streamOriginalsInBackground(reordered, sid);
   };
 
-  // Background HD Original Asset Sync Queue with IndexedDB Persistence
   const streamOriginalsInBackground = async (originalFilesMap, uploadSessionId) => {
     const photoIds = Object.keys(originalFilesMap).filter(
       pid => !syncedIdsRef.current.has(pid)
@@ -215,7 +286,6 @@ export default function App() {
     setSyncStatus({ synced: 0, total });
     let syncedCount = 0;
 
-    // Concurrency pool of 3 parallel streams
     const concurrency = 3;
     for (let i = 0; i < photoIds.length; i += concurrency) {
       const chunk = photoIds.slice(i, i + concurrency);
@@ -223,14 +293,9 @@ export default function App() {
         const file = originalFilesMap[photoId];
         if (!file) return;
 
-        // 1. Immediately persist original file blob to IndexedDB, tagged with
-        //    its session so auto-resume can attribute it after a refresh.
         await saveOriginalBlob(photoId, file, uploadSessionId);
 
         try {
-          // The transport negotiates with the server: direct-to-bucket when
-          // that is enabled, otherwise the original multipart endpoint. Either
-          // way the outcome vocabulary here is the same.
           const outcome = await uploadOriginal({
             sessionId: uploadSessionId,
             photoId,
@@ -243,13 +308,10 @@ export default function App() {
             syncedCount++;
             setSyncStatus({ synced: syncedCount, total });
           } else if (outcome === Outcome.PERMANENT) {
-            // Wrong session, unknown photo, or over the size/quota cap. Mark it
-            // synced so the queue stops offering it back.
             console.warn(`[Background Sync] Discarding ${photoId}; server will never accept it.`);
             await removeOriginalBlob(photoId);
             syncedIdsRef.current.add(photoId);
           }
-          // Outcome.RETRY: the blob stays in IndexedDB for auto-resume.
         } catch (err) {
           console.warn(`[Background Sync] Will retry later for ${photoId}:`, err);
         }
@@ -257,12 +319,6 @@ export default function App() {
     }
   };
 
-  /**
-   * Upload one ingest chunk, retrying transient failures with exponential
-   * backoff. 4xx responses are permanent (bad session, oversized batch) and are
-   * not retried. Chunks are idempotent server-side — INSERT OR REPLACE keyed on
-   * the client-minted photo_id — so a retry cannot duplicate photos.
-   */
   const uploadChunkWithRetry = async (payload, attempt = 0) => {
     const MAX_RETRIES = 3;
     try {
@@ -278,21 +334,19 @@ export default function App() {
       throw new Error(`Server error ${res.status}`);
     } catch (err) {
       if (err.permanent || attempt >= MAX_RETRIES) throw err;
-      const backoffMs = 2 ** attempt * 1000; // 1s, 2s, 4s
+      const backoffMs = 2 ** attempt * 1000;
       console.warn(`[Ingest] Chunk failed (${err.message}); retrying in ${backoffMs}ms`);
       await new Promise(r => setTimeout(r, backoffMs));
       return uploadChunkWithRetry(payload, attempt + 1);
     }
   };
 
-  // Triggered after Phase 1 client-side downsampling completes
   const handlePhotosUploaded = async (uploadPackage) => {
     const { processedCount, processedPhotos, downsampler, downsampleTimeMs } = uploadPackage;
     setUploadedCount(processedCount);
     setIsPhotoUploadComplete(false);
-    setStep('chat'); // Immediately show AI Chatbot / Theme Selector in foreground!
+    setStep('chat');
 
-    // Record Client-side Downsample telemetry to backend metrics
     if (downsampleTimeMs) {
       try {
         fetch('/api/client-metrics', {
@@ -307,7 +361,6 @@ export default function App() {
       } catch (_) {}
     }
 
-    // Build raw original files mapping for background stream
     const origMap = {};
     if (processedPhotos) {
       processedPhotos.forEach(p => {
@@ -318,9 +371,6 @@ export default function App() {
     }
 
     try {
-      // 1. Open ONE session before uploading anything. Every chunk below carries
-      //    this token, so a 1,000-photo upload is a single session rather than
-      //    one orphaned session per chunk.
       const sessionRes = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -335,10 +385,6 @@ export default function App() {
       const { session_id, chunk_size } = await sessionRes.json();
       persistSessionId(session_id);
 
-      // 2. Upload thumbnail chunks SEQUENTIALLY. Each chunk triggers CPU-bound
-      //    filtering server-side; firing all chunks at once from 20 concurrent
-      //    users would swamp the filter pool. Sequential per user, concurrent
-      //    across users, is the shape the backend is sized for.
       const chunks = PixovoClientDownsampler.chunk(processedPhotos, chunk_size || 40);
       setIngestProgress({ done: 0, total: chunks.length, survived: 0 });
 
@@ -348,8 +394,6 @@ export default function App() {
         const data = await uploadChunkWithRetry(payload);
 
         allPhotos.push(...(data.photos || []));
-        // Publish incrementally so generation can start on early chunks and the
-        // UI can show real progress rather than waiting for the whole batch.
         uploadedPhotosRef.current = allPhotos.slice();
         setUploadedPhotos(allPhotos.slice());
         setIngestProgress({
@@ -365,12 +409,6 @@ export default function App() {
         `across ${chunks.length} chunks.`
       );
 
-      // 3. Launch background HD streaming for SURVIVORS ONLY.
-      //
-      //    Stage 1.3: previously every photo's original was queued, including
-      //    the ~40% the filter engine rejected. Uploading an 8MB original for a
-      //    photo that will never appear in the book is pure waste — at the load
-      //    target it is the difference between ~160GB and ~40GB of disk.
       const survivorIds = new Set(allPhotos.map(p => p.id));
       const survivorOrigMap = {};
       for (const [pid, file] of Object.entries(origMap)) {
@@ -390,11 +428,10 @@ export default function App() {
     }
   };
 
-  const handleGenerateVariationsAsync = async (promptOverride) => {
-    // Wait for in-flight Phase 1 ingestion upload to complete if photos were selected
+  const handleGenerateVariationsAsync = async (promptOverride, options = {}) => {
     let photosToUse = uploadedPhotos.length > 0 ? uploadedPhotos : uploadedPhotosRef.current;
     if (photosToUse.length === 0 && uploadedCount > 0) {
-      for (let i = 0; i < 40; i++) { // wait up to 8 seconds for ingestion
+      for (let i = 0; i < 40; i++) {
         if (uploadedPhotosRef.current.length > 0) {
           photosToUse = uploadedPhotosRef.current;
           break;
@@ -403,11 +440,20 @@ export default function App() {
       }
     }
 
-    const promptToUse = promptOverride || userPrompt;
+    const promptToUse = promptOverride !== undefined ? promptOverride : userPrompt;
+    const nextPrefs = {
+      custom_title: options.custom_title !== undefined ? options.custom_title : studioPrefs.custom_title,
+      include_text: options.include_text !== undefined ? options.include_text : studioPrefs.include_text,
+      subtitle: options.subtitle !== undefined ? options.subtitle : studioPrefs.subtitle
+    };
+    setStudioPrefs(nextPrefs);
+
     setIsLoading(true);
     setStep('generating');
+    setJobStatus('processing');
     setJobProgress(10);
-    setJobMessage("Submitting async photobook job...");
+    setDisplayProgress(8);
+    setJobMessage('Submitting async photobook job...');
 
     try {
       const photoIds = photosToUse.map(p => p.id);
@@ -418,9 +464,10 @@ export default function App() {
         body: JSON.stringify({
           photo_ids: photoIds,
           user_prompt: promptToUse,
-          // Lets the backend load photos with one indexed query in capture-time
-          // order, instead of chunking the id list into IN (...) clauses.
-          session_id: sessionIdRef.current
+          session_id: sessionIdRef.current,
+          custom_title: nextPrefs.custom_title,
+          include_text: nextPrefs.include_text,
+          subtitle: nextPrefs.subtitle
         })
       });
 
@@ -429,13 +476,15 @@ export default function App() {
         setCurrentJobId(job.job_id);
         pollJobStatus(job.job_id);
       } else {
-        alert("Failed to submit job");
+        alert('Failed to submit job');
         setIsLoading(false);
+        setJobStatus('failed');
         setStep('chat');
       }
     } catch (e) {
-      console.error("Generation error:", e);
+      console.error('Generation error:', e);
       setIsLoading(false);
+      setJobStatus('failed');
       setStep('chat');
     }
   };
@@ -448,20 +497,19 @@ export default function App() {
         if (res.ok) {
           const job = await res.json();
           setJobProgress(job.progress || 0);
-          setJobMessage(job.message || "Processing...");
+          setJobStatus(job.status || 'processing');
+          setJobMessage(job.message || 'Processing...');
 
-          if (job.status === "completed" && job.result) {
+          if (job.status === 'completed' && job.result) {
             clearInterval(interval);
+            setDisplayProgress(100);
             const vars = job.result.variations || [];
             setVariations(vars);
             setActiveVarIdx(0);
             setIsLoading(false);
             setStep('preview');
-            // Now that we know which photos are actually placed, push their HD
-            // originals to the front of the upload queue so export unblocks
-            // sooner (Stage 1.3 Task 4).
             if (vars.length > 0) prioritiseOriginalsForVariation(vars[0]);
-          } else if (job.status === "failed") {
+          } else if (job.status === 'failed') {
             clearInterval(interval);
             alert(`Generation failed: ${job.message}`);
             setIsLoading(false);
@@ -469,7 +517,7 @@ export default function App() {
           }
         }
       } catch (err) {
-        console.error("Polling error:", err);
+        console.error('Polling error:', err);
       }
     }, 500);
     pollIntervalRef.current = interval;
@@ -500,8 +548,6 @@ export default function App() {
         body: JSON.stringify({
           job_id: currentJobId,
           seed_offset: nextOffset,
-          // Required since Stage 1.6: reshuffle reloads this session's photos
-          // rather than reading the process-wide cache.
           session_id: sessionIdRef.current
         })
       });
@@ -511,7 +557,7 @@ export default function App() {
         setVariations(result.variations || []);
       }
     } catch (err) {
-      console.error("Variations reshuffle error:", err);
+      console.error('Variations reshuffle error:', err);
     } finally {
       setIsReshufflingVars(false);
     }
@@ -520,7 +566,7 @@ export default function App() {
   const handleExportPDF = async () => {
     const selectedVar = variations[activeVarIdx];
     if (!selectedVar) {
-      alert("No photobook variation selected for PDF export.");
+      alert('No photobook variation selected for PDF export.');
       return;
     }
 
@@ -539,10 +585,6 @@ export default function App() {
         })
       });
 
-      // Stage 1.3: originals upload on demand, so a print export can be
-      // requested before every placed photo's HD file has arrived. The server
-      // now says so explicitly instead of quietly embedding 512px thumbnails
-      // into a 300 DPI PDF.
       if (res.status === 409) {
         const body = await res.json().catch(() => ({}));
         const info = body.detail || {};
@@ -569,29 +611,20 @@ export default function App() {
           link.click();
           document.body.removeChild(link);
         } else {
-          alert("PDF compiled successfully!");
+          alert('PDF compiled successfully!');
         }
       } else {
         const err = await res.json();
         alert(`PDF Export Error: ${err.detail || 'Failed to compile PDF'}`);
       }
     } catch (e) {
-      console.error("PDF Export Error:", e);
-      alert("PDF Export failed. Check backend log.");
+      console.error('PDF Export Error:', e);
+      alert('PDF Export failed. Check backend log.');
     } finally {
       setIsExportingPDF(false);
     }
   };
 
-  /**
-   * Hard reset back to the upload screen.
-   *
-   * There is otherwise no way to start a second album without reloading the
-   * tab: the session id is persisted in sessionStorage and rehydrated on
-   * mount, so a plain refresh drops the user straight back into 'chat'.
-   * Clearing the stored id, the queued originals and every derived piece of
-   * state is what actually makes step === 'upload' reachable again.
-   */
   const handleClearSession = async () => {
     const hasWork = uploadedCount > 0 || variations.length > 0;
     if (hasWork && !window.confirm('Clear this session and start a new album? Uploaded photos and generated layouts will be discarded.')) {
@@ -605,9 +638,6 @@ export default function App() {
 
     persistSessionId(null);
     await clearAllBlobs();
-    // The direct-upload circuit breaker is per session, not per page load: a
-    // bucket CORS policy fixed between sessions should take effect on the next
-    // upload rather than requiring a refresh.
     resetTransport();
 
     uploadedPhotosRef.current = [];
@@ -624,11 +654,14 @@ export default function App() {
     setVariationSeedOffset(1);
     setCurrentJobId(null);
     setJobProgress(0);
+    setDisplayProgress(0);
+    setJobStatus('idle');
     setJobMessage('');
+    setUserPrompt('');
+    setStudioPrefs({ custom_title: null, include_text: true, subtitle: null });
     setIsLoading(false);
     setIsExportingPDF(false);
     setIsReshufflingVars(false);
-    setActiveMode('story');
     setStep('upload');
 
     console.log('[Session] Cleared; ready for a new upload.');
@@ -640,11 +673,21 @@ export default function App() {
     }
   };
 
+  // Determine each synthesis stage's state strictly from real jobProgress / jobStatus
+  const getSynthesisStageState = (stage) => {
+    if (stage.id === 4) {
+      if (jobStatus === 'completed' && jobProgress >= 100) return 'complete';
+      if (jobProgress >= 70) return 'active';
+      return 'pending';
+    }
+    if (jobProgress >= stage.completeAt) return 'complete';
+    if (jobProgress >= stage.minProgress) return 'active';
+    return 'pending';
+  };
+
   return (
     <div className="app-container">
-      <ToolbarHeader 
-        activeMode={activeMode} 
-        setActiveMode={setActiveMode}
+      <ToolbarHeader
         onExportPDF={step === 'preview' ? handleExportPDF : null}
         isExporting={isExportingPDF}
         syncStatus={syncStatus}
@@ -653,75 +696,113 @@ export default function App() {
       />
 
       <main className="main-wrapper">
-        {activeMode === 'inspector' && (
-          <BoilerplateInspector />
-        )}
-
-        {activeMode === 'stats' && (
-          <SystemStatsDashboard />
-        )}
-
-        {activeMode === 'story' && (
-          <>
-            {step === 'generating' && (
-              <div className="step-card" style={{ textAlign: 'center', padding: '3rem' }}>
-                <h3 style={{ marginBottom: '1rem', color: '#1F2937' }}>{jobMessage}</h3>
-                <div style={{
-                  width: '100%',
-                  height: '10px',
-                  background: '#E5E7EB',
-                  borderRadius: '5px',
-                  overflow: 'hidden',
-                  marginTop: '1.5rem'
-                }}>
-                  <div style={{
-                    width: `${jobProgress}%`,
-                    height: '100%',
-                    background: 'linear-gradient(90deg, #8B5CF6, #EC4899)',
-                    transition: 'width 0.3s ease'
-                  }} />
+        {step === 'generating' && (
+          <div className="step-card synthesis-loader-card">
+            <div className="synthesis-top-row">
+              <div className="synthesis-orb-wrapper">
+                <div className="synthesis-pulse-ring" />
+                <div className="synthesis-rotate-ring" />
+                <div className="synthesis-orb-core">
+                  <Sparkles size={20} strokeWidth={1.75} color="var(--px-brand-iris)" />
                 </div>
-                <p style={{ marginTop: '0.75rem', color: '#6B7280', fontSize: '0.9rem' }}>{jobProgress}% completed</p>
               </div>
-            )}
 
-            {step === 'upload' && (
-              <PhotoUploader 
-                onPhotosUploaded={handlePhotosUploaded} 
-                isUploading={isLoading} 
-              />
-            )}
-
-            {step === 'chat' && (
-              <AIChatbotWidget
-                userPrompt={userPrompt}
-                setUserPrompt={setUserPrompt}
-                onGenerate={handleGenerateVariationsAsync}
-                isPhotoUploadComplete={isPhotoUploadComplete}
-                uploadedCount={uploadedCount}
-                isLoading={isLoading}
-              />
-            )}
-
-            {step === 'preview' && (
-              <div className="story-preview-container">
-                <BookCarousel3D
-                  variations={variations}
-                  activeIdx={activeVarIdx}
-                  setActiveIdx={setActiveVarIdx}
-                  onScrollDown={scrollToSpreads}
-                  onReshuffleVariations={handleReshuffleVariations}
-                  isReshuffling={isReshufflingVars}
-                />
-
-                <SpreadViewer
-                  selectedVariation={variations[activeVarIdx]}
-                  targetRef={spreadsRef}
-                  onSpreadUpdate={handleSpreadUpdate}
-                />
+              <div className="synthesis-title-group">
+                <span className="synthesis-eyebrow">Pixovo Editorial Engine</span>
+                <h3>Synthesizing Your Photobook Editions</h3>
+                <p>{jobMessage || 'Processing layout intelligence...'}</p>
               </div>
-            )}
-          </>
+
+              <div className="synthesis-timer-pill">
+                <Clock size={14} strokeWidth={1.75} />
+                <span>{elapsedSeconds}s</span>
+              </div>
+            </div>
+
+            {/* Smoothly Interpolated Progress Track Bound to Real Checkpoints */}
+            <div className="synthesis-progress-track">
+              <div
+                className="synthesis-progress-fill"
+                style={{ width: `${displayProgress}%` }}
+              />
+            </div>
+            <div className="synthesis-progress-meta">
+              <span>Checkpoint Progress</span>
+              <span>{displayProgress}%</span>
+            </div>
+
+            {/* 4-Stage Milestone List Strictly Gated by Real Backend Progress */}
+            <div className="synthesis-stage-list">
+              {SYNTHESIS_STAGES.map((stage) => {
+                const state = getSynthesisStageState(stage);
+                return (
+                  <div key={stage.id} className={`synthesis-stage-item ${state}`}>
+                    <div className="synthesis-stage-icon">
+                      {state === 'complete' ? (
+                        <Check size={14} strokeWidth={2.5} />
+                      ) : state === 'active' ? (
+                        <RefreshCw size={14} strokeWidth={2} className="animate-spin" />
+                      ) : (
+                        <span>0{stage.id}</span>
+                      )}
+                    </div>
+                    <div className="synthesis-stage-copy">{stage.copy}</div>
+                    <div className="synthesis-stage-badge">
+                      {state === 'complete'
+                        ? 'Verified'
+                        : state === 'active'
+                        ? 'In Progress'
+                        : 'Queued'}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Rotating Micro-Facts Ticker */}
+            <div className="synthesis-fact-ticker" key={factIndex}>
+              <span>{MICRO_FACTS[factIndex]}</span>
+            </div>
+          </div>
+        )}
+
+        {step === 'upload' && (
+          <PhotoUploader
+            onPhotosUploaded={handlePhotosUploaded}
+            isUploading={isLoading}
+          />
+        )}
+
+        {step === 'chat' && (
+          <AIChatbotWidget
+            userPrompt={userPrompt}
+            setUserPrompt={setUserPrompt}
+            onGenerate={handleGenerateVariationsAsync}
+            isPhotoUploadComplete={isPhotoUploadComplete}
+            uploadedCount={uploadedCount}
+            isLoading={isLoading}
+            sessionId={sessionId}
+          />
+        )}
+
+        {step === 'preview' && (
+          <div className="story-preview-container">
+            <BookCarousel3D
+              variations={variations}
+              activeIdx={activeVarIdx}
+              setActiveIdx={setActiveVarIdx}
+              onScrollDown={scrollToSpreads}
+              onReshuffleVariations={handleReshuffleVariations}
+              isReshuffling={isReshufflingVars}
+            />
+
+            <SpreadViewer
+              selectedVariation={variations[activeVarIdx]}
+              targetRef={spreadsRef}
+              onSpreadUpdate={handleSpreadUpdate}
+              sessionId={sessionId}
+            />
+          </div>
         )}
       </main>
     </div>

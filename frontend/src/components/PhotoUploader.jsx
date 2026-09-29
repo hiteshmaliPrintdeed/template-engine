@@ -123,18 +123,18 @@ export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '0.85rem 1.25rem',
-          background: '#EFF6FF',
-          border: '1px solid #BFDBFE',
+          background: 'var(--px-brand-iris-subtle)',
+          border: '1px solid var(--px-brand-iris-border)',
           borderRadius: '12px',
           marginBottom: '1.5rem'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <Loader2 size={20} color="#3B82F6" className="animate-spin" />
-            <span style={{ fontWeight: 600, color: '#1E40AF', fontSize: '0.92rem' }}>
+            <Loader2 size={20} color="var(--px-brand-iris)" className="animate-spin" />
+            <span style={{ fontWeight: 600, color: 'var(--px-brand-iris-active)', fontSize: '0.92rem' }}>
               Downsampling 512px thumbnails ({progressStats.completed} / {progressStats.total})...
             </span>
           </div>
-          <span style={{ fontSize: '0.8rem', color: '#6B7280', fontWeight: 500 }}>
+          <span style={{ fontSize: '0.8rem', color: 'var(--px-text-muted)', fontWeight: 500 }}>
             {Math.round((progressStats.completed / Math.max(1, progressStats.total)) * 100)}%
           </span>
         </div>
@@ -146,13 +146,13 @@ export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
           alignItems: 'center',
           gap: '0.6rem',
           padding: '0.75rem 1.25rem',
-          background: '#ECFDF5',
-          border: '1px solid #A7F3D0',
+          background: 'var(--px-status-success-bg)',
+          border: '1px solid var(--px-status-success-border)',
           borderRadius: '12px',
           marginBottom: '1.5rem'
         }}>
-          <CheckCircle2 size={18} color="#10B981" />
-          <span style={{ fontWeight: 600, color: '#065F46', fontSize: '0.9rem' }}>
+          <CheckCircle2 size={18} color="var(--px-status-success-text)" />
+          <span style={{ fontWeight: 600, color: 'var(--px-status-success-text)', fontSize: '0.9rem' }}>
             {localPhotos.length} Photos Prepared & Downsampled. Ready for AI Theme Selection!
           </span>
         </div>
@@ -165,11 +165,11 @@ export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
         onDragLeave={handleDrag}
         onDrop={handleDrop}
       >
-        <UploadCloud size={48} color="#8B5CF6" style={{ marginBottom: '1rem' }} />
-        <h4 style={{ fontSize: '1.1rem', marginBottom: '0.5rem' }}>
-          Drag & drop photos here, or <span style={{ color: '#8B5CF6', textDecoration: 'underline' }}>browse</span>
+        <UploadCloud size={48} color="var(--px-brand-iris)" strokeWidth={1.5} style={{ marginBottom: '1rem' }} />
+        <h4 style={{ fontSize: '1.1rem', marginBottom: '0.5rem', color: 'var(--px-text-primary)' }}>
+          Drag & drop photos here, or <span style={{ color: 'var(--px-brand-iris)', textDecoration: 'underline' }}>browse</span>
         </h4>
-        <p style={{ color: '#6B7280', fontSize: '0.85rem' }}>
+        <p style={{ color: 'var(--px-text-muted)', fontSize: '0.85rem' }}>
           {isProcessing ? "Processing 512px canvas downsampling..." : "Supports JPEG, PNG, WebP (20 to 200 photos)"}
         </p>
         
@@ -195,8 +195,8 @@ export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
       {localPhotos.length > 0 && (
         <div style={{ marginTop: '2rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <h4 style={{ fontWeight: 600 }}>Prepared Photos ({localPhotos.length})</h4>
-            <span style={{ fontSize: '0.82rem', color: '#6B7280' }}>512px Optimized Thumbnails</span>
+            <h4 style={{ fontWeight: 600, color: 'var(--px-text-primary)' }}>Prepared Photos ({localPhotos.length})</h4>
+            <span style={{ fontSize: '0.82rem', color: 'var(--px-text-muted)' }}>512px Optimized Thumbnails</span>
           </div>
 
           <div className="photo-grid" style={{
@@ -206,9 +206,9 @@ export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
             maxHeight: '320px',
             overflowY: 'auto',
             padding: '0.5rem',
-            background: '#F9FAFB',
+            background: 'var(--px-canvas-bg)',
             borderRadius: '12px',
-            border: '1px solid #E5E7EB'
+            border: '1px solid var(--px-border-light)'
           }}>
             {localPhotos.map((p, idx) => (
               <div key={idx} className="photo-card" style={{
@@ -216,7 +216,7 @@ export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
                 borderRadius: '8px',
                 overflow: 'hidden',
                 aspectRatio: '1',
-                background: '#E5E7EB'
+                background: 'var(--px-border-subtle)'
               }}>
                 <img 
                   src={p.previewUrl} 

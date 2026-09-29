@@ -81,7 +81,7 @@ export default function BookCarousel3D({ variations, activeIdx, setActiveIdx, on
           disabled={isReshuffling}
           style={{ marginBottom: '1rem', padding: '0.5rem 1.25rem', borderRadius: '20px', fontWeight: 600 }}
         >
-          <Shuffle size={16} color="#8B5CF6" />
+          <Shuffle size={16} color="var(--px-brand-iris)" strokeWidth={1.75} />
           <span>{isReshuffling ? "Reshuffling Variations..." : "Reshuffle Palettes & Layouts (3 Variations)"}</span>
         </button>
       )}

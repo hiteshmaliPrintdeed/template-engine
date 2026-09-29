@@ -145,6 +145,7 @@ def init_db():
         """)
         _ensure_photo_columns(conn)
         _ensure_session_columns(conn)
+        _ensure_job_columns(conn)
     # NOTE: no conn.close() — the connection is thread-local and reused.
     logger.info(f"[DB] Initialized persistent SQLite database at: {DB_PATH}")
 
@@ -162,30 +163,29 @@ _PHOTO_COLUMN_MIGRATIONS = [
     ("tenengrad_score", "REAL"),
     ("contrast_score", "REAL"),
     # --- S3 direct upload ---------------------------------------------------
-    # Storage keys alongside the URL columns, for SERVER-side use only: confirm
-    # verification, retention, and resolving an original without looping seven
-    # extensions. URLs are deliberately NOT derived from these — url_for() stays
-    # a durable relative path in both modes, because these same URL strings are
-    # persisted into jobs.variations_json and read back by the reshuffle path.
-    # Legacy rows get NULL, and every consumer falls back to recomputing
-    # storage_key(...) exactly as it does today, so these are an optimisation
-    # rather than a dependency.
     ("thumbnail_key", "TEXT"),
     ("original_key", "TEXT"),
-    # Verified via head_object at confirm time. Never the client's claim.
     ("original_bytes", "INTEGER DEFAULT 0"),
     ("original_etag", "TEXT"),
-    # The client's declared original size, carried in the ingest metadata. An
-    # admission hint for presign-time quota reservation only — never accounting.
     ("declared_bytes", "INTEGER DEFAULT 0"),
     ("presigned_at", "TIMESTAMP"),
 ]
 
-# Same idempotent-ALTER treatment for `sessions`, which had no migration list
-# because nothing had been added to it since it shipped.
+# Same idempotent-ALTER treatment for `sessions` and `jobs`.
 _SESSION_COLUMN_MIGRATIONS = [
     ("presign_count", "INTEGER DEFAULT 0"),
     ("last_presign_at", "TIMESTAMP"),
+    # Stage 3.2: Guided Story Studio content preferences & cached title brainstorm
+    ("custom_title", "TEXT"),
+    ("include_text", "INTEGER DEFAULT 1"),
+    ("subtitle", "TEXT"),
+    ("suggested_titles_json", "TEXT"),
+]
+
+_JOB_COLUMN_MIGRATIONS = [
+    ("custom_title", "TEXT"),
+    ("include_text", "INTEGER DEFAULT 1"),
+    ("subtitle", "TEXT"),
 ]
 
 
@@ -209,6 +209,17 @@ def _ensure_session_columns(conn: sqlite3.Connection) -> None:
             added.append(column)
     if added:
         logger.info(f"[DB] Migrated sessions table: added {', '.join(added)}")
+
+
+def _ensure_job_columns(conn: sqlite3.Connection) -> None:
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)")}
+    added = []
+    for column, ddl in _JOB_COLUMN_MIGRATIONS:
+        if column not in existing:
+            conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} {ddl}")
+            added.append(column)
+    if added:
+        logger.info(f"[DB] Migrated jobs table: added {', '.join(added)}")
 
 
 def _row_to_photo_meta(row: sqlite3.Row) -> PhotoMeta:
@@ -659,7 +670,127 @@ class SessionStore:
         return cur.fetchone()["count"]
 
     @staticmethod
-    def save_job(job: JobStatusResponse, session_id: Optional[str] = None) -> None:
+    def save_title_suggestions(session_id: Optional[str], suggestions: Dict[str, Any]) -> None:
+        """Persists suggest-titles output against session_id so a session only calls AI once."""
+        if not session_id or not suggestions:
+            return
+        conn = get_db_connection()
+        payload = json.dumps(suggestions)
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO sessions (session_id, suggested_titles_json, last_accessed_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    suggested_titles_json = excluded.suggested_titles_json,
+                    last_accessed_at = CURRENT_TIMESTAMP
+                """,
+                (session_id, payload),
+            )
+
+    @staticmethod
+    def get_title_suggestions(session_id: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Reads cached suggest-titles output for session_id, if any."""
+        if not session_id:
+            return None
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT suggested_titles_json FROM sessions WHERE session_id = ?",
+            (session_id,),
+        )
+        row = cur.fetchone()
+        if not row or not row["suggested_titles_json"]:
+            return None
+        try:
+            return json.loads(row["suggested_titles_json"])
+        except Exception:
+            return None
+
+    @staticmethod
+    def save_session_preferences(
+        session_id: Optional[str],
+        custom_title: Optional[str] = None,
+        include_text: bool = True,
+        subtitle: Optional[str] = None,
+        job_id: Optional[str] = None,
+    ) -> None:
+        """Persists Studio content preferences against session_id (and job_id) for reshuffle."""
+        conn = get_db_connection()
+        inc_int = 1 if include_text else 0
+        with conn:
+            if session_id:
+                conn.execute(
+                    """
+                    INSERT INTO sessions (session_id, custom_title, include_text, subtitle, last_accessed_at)
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(session_id) DO UPDATE SET
+                        custom_title = excluded.custom_title,
+                        include_text = excluded.include_text,
+                        subtitle = excluded.subtitle,
+                        last_accessed_at = CURRENT_TIMESTAMP
+                    """,
+                    (session_id, custom_title, inc_int, subtitle),
+                )
+            if job_id:
+                conn.execute(
+                    """
+                    UPDATE jobs
+                       SET custom_title = ?, include_text = ?, subtitle = ?, updated_at = CURRENT_TIMESTAMP
+                     WHERE job_id = ?
+                    """,
+                    (custom_title, inc_int, subtitle, job_id),
+                )
+
+    @staticmethod
+    def get_session_preferences(
+        session_id: Optional[str] = None,
+        job_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Reads persisted custom_title/include_text/subtitle from sessions or jobs."""
+        conn = get_db_connection()
+        cur = conn.cursor()
+        if session_id:
+            cur.execute(
+                "SELECT custom_title, include_text, subtitle FROM sessions WHERE session_id = ?",
+                (session_id,),
+            )
+            row = cur.fetchone()
+            if row and row["include_text"] is not None:
+                return {
+                    "custom_title": row["custom_title"],
+                    "include_text": bool(row["include_text"]),
+                    "subtitle": row["subtitle"],
+                }
+        if job_id:
+            cur.execute(
+                "SELECT session_id, custom_title, include_text, subtitle FROM jobs WHERE job_id = ?",
+                (job_id,),
+            )
+            jrow = cur.fetchone()
+            if jrow:
+                if jrow["include_text"] is not None:
+                    return {
+                        "custom_title": jrow["custom_title"],
+                        "include_text": bool(jrow["include_text"]),
+                        "subtitle": jrow["subtitle"],
+                    }
+                if jrow["session_id"] and jrow["session_id"] != session_id:
+                    return SessionStore.get_session_preferences(session_id=jrow["session_id"])
+        return {
+            "custom_title": None,
+            "include_text": True,
+            "subtitle": None,
+        }
+
+    @staticmethod
+    def save_job(
+        job: JobStatusResponse,
+        session_id: Optional[str] = None,
+        custom_title: Optional[str] = None,
+        include_text: Optional[bool] = None,
+        subtitle: Optional[str] = None,
+    ) -> None:
         conn = get_db_connection()
         result_json = None
         if job.result and job.result.variations:
@@ -667,20 +798,55 @@ class SessionStore:
                 "theme_name": job.result.theme_name,
                 "variations": [v.dict() for v in job.result.variations]
             })
+
+        # Preserve existing preferences on the job row if not explicitly overridden
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT session_id, custom_title, include_text, subtitle FROM jobs WHERE job_id = ?",
+            (job.job_id,),
+        )
+        existing = cur.fetchone()
+        eff_session = session_id or (existing["session_id"] if existing else None)
+        eff_title = custom_title if custom_title is not None else (existing["custom_title"] if existing else None)
+        if include_text is not None:
+            eff_inc = 1 if include_text else 0
+        elif existing and existing["include_text"] is not None:
+            eff_inc = int(existing["include_text"])
+        else:
+            eff_inc = 1
+        eff_sub = subtitle if subtitle is not None else (existing["subtitle"] if existing else None)
+
         with conn:
             conn.execute("""
                 INSERT OR REPLACE INTO jobs (
-                    job_id, session_id, status, progress, message, variations_json, error_message, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    job_id, session_id, status, progress, message, variations_json, error_message,
+                    custom_title, include_text, subtitle, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """, (
                 job.job_id,
-                session_id,
+                eff_session,
                 job.status,
                 job.progress,
                 job.message,
                 result_json,
-                getattr(job, "error", None)
+                getattr(job, "error", None),
+                eff_title,
+                eff_inc,
+                eff_sub,
             ))
+            if eff_session and (custom_title is not None or include_text is not None or subtitle is not None):
+                conn.execute(
+                    """
+                    INSERT INTO sessions (session_id, custom_title, include_text, subtitle, last_accessed_at)
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(session_id) DO UPDATE SET
+                        custom_title = excluded.custom_title,
+                        include_text = excluded.include_text,
+                        subtitle = excluded.subtitle,
+                        last_accessed_at = CURRENT_TIMESTAMP
+                    """,
+                    (eff_session, eff_title, eff_inc, eff_sub),
+                )
 
     @staticmethod
     def get_job(job_id: str) -> Optional[JobStatusResponse]:
@@ -690,16 +856,16 @@ class SessionStore:
         row = cur.fetchone()
         if not row:
             return None
-        
+
         result_obj = None
         if row["variations_json"]:
             raw_data = json.loads(row["variations_json"])
             variations = [PhotobookVariation(**v) for v in raw_data.get("variations", [])]
             result_obj = GenerateVariationsResponse(
-                theme_name=raw_data.get("theme_name", "Devotional / Temple"),
+                theme_name=raw_data.get("theme_name", "Warm"),
                 variations=variations
             )
-        
+
         return JobStatusResponse(
             job_id=row["job_id"],
             status=row["status"],
@@ -714,3 +880,4 @@ class SessionStore:
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) as count FROM jobs")
         return cur.fetchone()["count"]
+

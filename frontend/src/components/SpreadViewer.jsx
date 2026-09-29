@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shuffle } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 
-export default function SpreadViewer({ selectedVariation, targetRef, onSpreadUpdate }) {
+export default function SpreadViewer({ selectedVariation, targetRef, onSpreadUpdate, sessionId }) {
   const [reshufflingIdx, setReshufflingIdx] = useState(null);
   const [seedCounters, setSeedCounters] = useState({});
   const [scrollTop, setScrollTop] = useState(0);
@@ -60,7 +60,8 @@ export default function SpreadViewer({ selectedVariation, targetRef, onSpreadUpd
         body: JSON.stringify({
           spread: spread,
           theme_name: selectedVariation.theme_name || "Warm",
-          seed: nextSeed
+          seed: nextSeed,
+          session_id: sessionId || null
         })
       });
 
@@ -78,8 +79,8 @@ export default function SpreadViewer({ selectedVariation, targetRef, onSpreadUpd
   };
 
   return (
-    <div 
-      className="spreads-list" 
+    <div
+      className="spreads-list"
       ref={(el) => {
         containerRef.current = el;
         if (typeof targetRef === 'function') targetRef(el);
@@ -100,7 +101,7 @@ export default function SpreadViewer({ selectedVariation, targetRef, onSpreadUpd
 
         return (
           <div key={originalIdx} className="spread-pair-container">
-            {/* Action Bar Above Spread */}
+            {/* Clean Spread Heading */}
             <div style={{
               width: '100%',
               display: 'flex',
@@ -109,20 +110,9 @@ export default function SpreadViewer({ selectedVariation, targetRef, onSpreadUpd
               marginBottom: '0.5rem',
               padding: '0 0.5rem'
             }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#4B5563' }}>
-                Spread #{spread.spread_index} ({left.page_number} & {right.page_number})
+              <span style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--px-text-muted)', letterSpacing: '0.02em' }}>
+                Spread {spread.spread_index} • Pages {left.page_number}–{right.page_number}
               </span>
-
-              <button
-                className="btn btn-secondary"
-                style={{ padding: '0.35rem 0.85rem', fontSize: '0.75rem', borderRadius: '16px' }}
-                onClick={() => handleSpreadClick(spread, originalIdx)}
-                disabled={isReshuffling}
-                title="Click to reshuffle layout family"
-              >
-                <Shuffle size={13} color="#8B5CF6" />
-                <span>{isReshuffling ? "Reshuffling..." : "Click Page to Shuffle Layout"}</span>
-              </button>
             </div>
 
             {/* Interactive Double Spread Canvas */}
@@ -137,15 +127,15 @@ export default function SpreadViewer({ selectedVariation, targetRef, onSpreadUpd
               title="Click to reshuffle layout"
             >
               {/* Left Page Background */}
-              <div 
+              <div
                 className="spread-half-bg left-half"
-                style={{ backgroundColor: left.background_color || '#FAF9F6' }}
+                style={{ backgroundColor: left.background_color || 'var(--px-canvas-warm)' }}
               />
 
               {/* Right Page Background */}
-              <div 
+              <div
                 className="spread-half-bg right-half"
-                style={{ backgroundColor: right.background_color || '#FAF9F6' }}
+                style={{ backgroundColor: right.background_color || 'var(--px-canvas-warm)' }}
               />
 
               {/* Central Spine Gutter Fold Shadow */}
@@ -168,9 +158,9 @@ export default function SpreadViewer({ selectedVariation, targetRef, onSpreadUpd
                         border: 'none'
                       }}
                     >
-                      <img 
-                        src={slot.photo_url} 
-                        alt="Spread photo" 
+                      <img
+                        src={slot.photo_url}
+                        alt="Spread photo"
                         style={{
                           width: '100%',
                           height: '100%',
@@ -196,13 +186,13 @@ export default function SpreadViewer({ selectedVariation, targetRef, onSpreadUpd
                             backdropFilter: 'blur(4px)',
                             display: 'flex',
                             alignItems: 'center',
-                            gap: '2px',
+                            gap: '3px',
                             boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
                             pointerEvents: 'auto',
                             zIndex: 10
                           }}
                         >
-                          <span>⚠️</span>
+                          <AlertTriangle size={12} strokeWidth={2} />
                           <span>{slot.effective_dpi ? `${Math.round(slot.effective_dpi)} DPI` : 'Low DPI'}</span>
                         </div>
                       )}
@@ -219,7 +209,7 @@ export default function SpreadViewer({ selectedVariation, targetRef, onSpreadUpd
                         top: `${slot.y_pct * 100}%`,
                         width: `${slot.w_pct * 100}%`,
                         height: `${slot.h_pct * 100}%`,
-                        color: slot.x_pct < 0.50 ? (left.text_color || '#1F2937') : (right.text_color || '#1F2937'),
+                        color: slot.x_pct < 0.50 ? (left.text_color || 'var(--px-text-primary)') : (right.text_color || 'var(--px-text-primary)'),
                         fontFamily: fontStyle,
                         pointerEvents: 'none'
                       }}

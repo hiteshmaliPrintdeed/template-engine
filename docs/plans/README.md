@@ -40,6 +40,14 @@ Detailed, executable plans for each stage of [`ROADMAP.md`](../../ROADMAP.md).
 | 2.3 | [Perceived instant](M2-2.3-perceived-instant.md) | 3–4 | 1.2, 2.2 |
 | 2.4 | [Interaction polish](M2-2.4-interaction-polish.md) | 2–3 | 2.3 |
 
+### Milestone 3 — Studio, Motion & Repository Polish (~8–9 days)
+
+| # | Plan | Days | Depends on |
+|---|---|---|---|
+| 3.1 | [Cleanup & de-cluttering](M3-3.1-cleanup-declutter.md) | 1 | — |
+| 3.2 | [Guided Story Studio & Gemini title engine](M3-3.2-guided-story-studio.md) | 4–5 | 3.1 |
+| 3.3 | [Motion system, verification & repository cleanup](M3-3.3-motion-verification-cleanup.md) | 3 | 3.2 |
+
 ## Dependency graph
 
 ```
@@ -53,6 +61,8 @@ Detailed, executable plans for each stage of [`ROADMAP.md`](../../ROADMAP.md).
    (independent, MUST land before 1.7)
 
 1.7 ──── 2.2 SSE ──── 2.3 perceived instant ──── 2.4 polish
+
+3.1 cleanup ──── 3.2 guided story studio ──── 3.3 motion & verification
 ```
 
 **1.1 is the hard blocker.** Nothing else can be built or load-tested until upload stops being one monolithic request under a session ID minted per-request.
@@ -101,3 +111,6 @@ Measured numbers and the capacity figure: [LOAD-RESULTS.md](LOAD-RESULTS.md).
 | 2.2 | Not started | | |
 | 2.3 | Not started | | |
 | 2.4 | Not started | | |
+| 3.1 | **Done** | | Removed `BoilerplateInspector`, `SystemStatsDashboard`, `EmotionThemeSelector`, duplicate spread shuffle button, and all emojis across UI & backend. |
+| 3.2 | **Done** | | Guided Story Studio configurator, `/api/chat/suggest-titles` with session caching, `include_text` gating across both `solver.py` caption branches and `dsa_solver.py` spread reshuffle, and session-persisted reshuffle preferences. |
+| 3.3 | **Done** | | Stage-mapped 4-stage AI Synthesis Loader bound to real `jobProgress` checkpoints (20/45/70/100), `--px-*` luxury design token system, `test_stage_3_2_studio_contract.py` green, and repository cleanup completed. |

@@ -144,10 +144,49 @@ class GenerateVariationsRequest(BaseModel):
     # Stage 1.4: lets the job worker load photos with one indexed query instead
     # of chunking the id list into `IN (...)` clauses of 500.
     session_id: Optional[str] = None
+    # Stage 3.2: Guided Story Studio content & cover typography preferences
+    custom_title: Optional[str] = None
+    include_text: bool = True
+    subtitle: Optional[str] = None
+
+
+class SuggestTitlesRequest(BaseModel):
+    user_prompt: str = ""
+    session_id: Optional[str] = None
+    photo_count: Optional[int] = 0
+
+
+class SuggestTitlesResponse(BaseModel):
+    titles: List[str]
+    subtitles: List[str]
+    category: str
+    suggested_captions: List[str]
+
+
+class SingleSpreadReshuffleRequest(BaseModel):
+    spread: SpreadPair
+    theme_name: str = "Warm"
+    seed: int = 1
+    session_id: Optional[str] = None
+
+
+class VariationsReshuffleRequest(BaseModel):
+    job_id: str
+    seed_offset: int = 1
+    # Stage 1.6: required so reshuffle reloads THIS session's photos.
+    # Stage 3.2: also used to look up persisted include_text/custom_title/subtitle.
+    session_id: Optional[str] = None
+
+
+# Aliases matching the PRD schema names
+ReshuffleSpreadRequest = SingleSpreadReshuffleRequest
+ReshuffleVariationsRequest = VariationsReshuffleRequest
+
 
 class GenerateVariationsResponse(BaseModel):
     theme_name: str
     variations: List[PhotobookVariation]
+
 
 class JobStatusResponse(BaseModel):
     job_id: str
@@ -155,3 +194,4 @@ class JobStatusResponse(BaseModel):
     progress: int  # 0 to 100
     message: str
     result: Optional[GenerateVariationsResponse] = None
+

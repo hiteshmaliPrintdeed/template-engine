@@ -522,14 +522,18 @@ def build_dsa_spread_pair(
 def reshuffle_single_spread_engine(
     spread: SpreadPair,
     theme_name: str,
-    variant_seed: int
+    variant_seed: int,
+    include_text: bool = True,
 ) -> SpreadPair:
     """Reshuffles a single spread's layout on click with detailed loguru stats."""
     start_time = time.perf_counter()
-    logger.info(f"[DSA Reshuffle API] Reshuffling Spread #{spread.spread_index} | Theme: {theme_name} | Seed: {variant_seed}")
+    logger.info(
+        f"[DSA Reshuffle API] Reshuffling Spread #{spread.spread_index} | "
+        f"Theme: {theme_name} | Seed: {variant_seed} | include_text={include_text}"
+    )
 
     all_photos = []
-    caption = None
+    caption = ""
 
     for slot in (spread.left_page.slots + spread.right_page.slots):
         if slot.type == "photo" and slot.photo_url:
@@ -546,13 +550,16 @@ def reshuffle_single_spread_engine(
         elif slot.type == "text" and slot.text_content:
             caption = slot.text_content
 
+    if not include_text:
+        caption = ""
+
     family_choice = LAYOUT_FAMILIES[variant_seed % len(LAYOUT_FAMILIES)]
     logger.debug(f"[DSA Reshuffle Mini-Step] Selected new family: {family_choice} for {len(all_photos)} photos")
 
     new_spread = build_dsa_spread_pair(
         spread_idx=spread.spread_index,
         photos=all_photos,
-        caption=caption or "RESUFFLED SPREAD",
+        caption=caption,
         theme_name=theme_name,
         family_variant=family_choice,
         family_variant_seed=variant_seed
@@ -561,3 +568,4 @@ def reshuffle_single_spread_engine(
     elapsed_ms = (time.perf_counter() - start_time) * 1000
     logger.info(f"[Metrics] Reshuffled Spread #{spread.spread_index} completed in {elapsed_ms:.2f}ms")
     return new_spread
+

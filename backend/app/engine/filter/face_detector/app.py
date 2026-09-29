@@ -73,7 +73,7 @@ def extract_file_from_multipart(body_bytes: bytes, content_type: str) -> bytes:
             if payload:
                 return payload
     except Exception as err:
-        print(f"⚠️ Multipart parsing warning: {err}")
+        print(f"️ Multipart parsing warning: {err}")
 
     return body_bytes
 
@@ -189,7 +189,7 @@ class FaceDetectorHTTPHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(clean_payload).encode("utf-8"))
 
             except Exception as e:
-                print("\n❌ Error processing image request:")
+                print("\n Error processing image request:")
                 traceback.print_exc()
                 self._set_headers(500, "application/json")
                 error_response = {"success": False, "error": str(e)}
@@ -204,8 +204,8 @@ def run_server():
     server_address = (HOST, PORT)
     httpd = HTTPServer(server_address, FaceDetectorHTTPHandler)
     print(f"\n==================================================")
-    print(f" 🚀 Pixovo Face Detector Web Server Running!")
-    print(f" 👉 Open URL in browser: http://localhost:{PORT}")
+    print(f"  Pixovo Face Detector Web Server Running!")
+    print(f"  Open URL in browser: http://localhost:{PORT}")
     print(f"==================================================\n")
     try:
         httpd.serve_forever()

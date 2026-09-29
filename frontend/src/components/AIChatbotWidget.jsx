@@ -1,13 +1,23 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Bot, Send, Sparkles, CheckCircle2, Loader2, Compass } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+  Sparkles,
+  Type,
+  BookOpen,
+  Image,
+  Check,
+  ArrowRight,
+  RefreshCw,
+  Compass,
+  Edit3
+} from 'lucide-react';
 
-const SUGGESTED_OCCASIONS = [
-  "Friends visit to ISKCON Temple",
-  "Family Vacation 2025",
-  "Birthday Celebration with Loved Ones",
-  "Weekend Getaway & Road Trip",
-  "College Graduation & Memories",
-  "Sacred Spires & Sunset Walk"
+const OCCASION_PILLS = [
+  'Road Trip',
+  'Family Holiday',
+  'Wedding Celebration',
+  'Milestone',
+  'Weekend Journey',
+  'Birthday Gathering'
 ];
 
 export default function AIChatbotWidget({
@@ -16,180 +26,380 @@ export default function AIChatbotWidget({
   onGenerate,
   isPhotoUploadComplete,
   uploadedCount,
-  isLoading
+  isLoading,
+  sessionId
 }) {
-  const [messages, setMessages] = useState([
-    {
-      sender: 'ai',
-      text: "Hey there! 👋 I'm analyzing your uploaded photos in the background right now. While I prepare the color palettes & safe bounds, would you like to share the occasion of this album in a short info (~20 words)?"
+  const [promptInput, setPromptInput] = useState(userPrompt || '');
+  const [selectedPill, setSelectedPill] = useState('');
+  const [isSuggestingTitles, setIsSuggestingTitles] = useState(false);
+  const [suggestions, setSuggestions] = useState(null);
+  const [selectedTitleIdx, setSelectedTitleIdx] = useState(null);
+  const [customTitle, setCustomTitle] = useState('');
+  const [customSubtitle, setCustomSubtitle] = useState('');
+  const [includeText, setIncludeText] = useState(true);
+
+  const handleSelectPill = (pill) => {
+    setSelectedPill(pill);
+    if (!promptInput.trim()) {
+      setPromptInput(pill);
+      setUserPrompt(pill);
+    } else if (!promptInput.toLowerCase().includes(pill.toLowerCase())) {
+      const next = `${pill} — ${promptInput}`;
+      setPromptInput(next);
+      setUserPrompt(next);
     }
-  ]);
-  const [inputVal, setInputVal] = useState(userPrompt || '');
-  const chatEndRef = useRef(null);
-
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  const handleSend = (textToSend) => {
-    const text = textToSend || inputVal;
-    if (!text.trim()) return;
-
-    setUserPrompt(text);
-
-    const updatedMessages = [
-      ...messages,
-      { sender: 'user', text: text },
-      {
-        sender: 'ai',
-        text: `Got it! "${text}" sounds like a wonderful memory. Generating 3 custom photobook designs with matching themes & captions...`
-      }
-    ];
-
-    setMessages(updatedMessages);
-    setInputVal('');
-
-    setTimeout(() => {
-      onGenerate(text);
-    }, 400);
   };
 
+  const handlePromptChange = (e) => {
+    const val = e.target.value;
+    setPromptInput(val);
+    setUserPrompt(val);
+  };
+
+  const handleSuggestTitles = async () => {
+    const query = promptInput.trim() || selectedPill || 'Cherished Memories';
+    setIsSuggestingTitles(true);
+    try {
+      const res = await fetch('/api/chat/suggest-titles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_prompt: query,
+          photo_count: uploadedCount || 0,
+          session_id: sessionId || null
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSuggestions(data);
+        if (data.titles && data.titles.length > 0) {
+          setSelectedTitleIdx(0);
+          setCustomTitle(data.titles[0]);
+          setCustomSubtitle(
+            (data.subtitles && data.subtitles[0]) || 'A COLLECTION OF MEMORIES'
+          );
+        }
+      }
+    } catch (err) {
+      console.error('Title suggestion error:', err);
+    } finally {
+      setIsSuggestingTitles(false);
+    }
+  };
+
+  const handlePickSuggestedCard = (idx) => {
+    if (!suggestions || !suggestions.titles) return;
+    setSelectedTitleIdx(idx);
+    const title = suggestions.titles[idx] || '';
+    const sub =
+      (suggestions.subtitles &&
+        suggestions.subtitles[idx % suggestions.subtitles.length]) ||
+      'A COLLECTION OF MEMORIES';
+    setCustomTitle(title);
+    setCustomSubtitle(sub);
+  };
+
+  const handleCustomTitleInput = (e) => {
+    setSelectedTitleIdx(null);
+    setCustomTitle(e.target.value);
+  };
+
+  const handleCustomSubtitleInput = (e) => {
+    setCustomSubtitle(e.target.value);
+  };
+
+  const handleLaunchGeneration = (e) => {
+    if (e) e.preventDefault();
+    const effectivePrompt =
+      promptInput.trim() || selectedPill || 'Cherished Memories';
+    setUserPrompt(effectivePrompt);
+
+    const trimmedTitle = customTitle.trim() || null;
+    const trimmedSubtitle = customSubtitle.trim() || null;
+
+    onGenerate(effectivePrompt, {
+      custom_title: trimmedTitle,
+      include_text: includeText,
+      subtitle: trimmedSubtitle
+    });
+  };
+
+  const displayTitlePreview =
+    customTitle.trim() ||
+    (promptInput.trim() ? promptInput.trim().toUpperCase() : 'YOUR PHOTOBOOK');
+
+  const displaySubtitlePreview =
+    customSubtitle.trim() || 'A COLLECTION OF MEMORIES';
+
   return (
-    <div className="step-card chat-widget-card" style={{ maxWidth: '780px', margin: '0 auto' }}>
-      {/* Background Status Indicator */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justify: 'space-between',
-        padding: '0.75rem 1.25rem',
-        background: isPhotoUploadComplete ? '#ECFDF5' : '#EFF6FF',
-        border: `1px solid ${isPhotoUploadComplete ? '#A7F3D0' : '#BFDBFE'}`,
-        borderRadius: '14px',
-        marginBottom: '1.5rem',
-        fontSize: '0.85rem'
-      }}>
+    <div className="step-card studio-configurator-card">
+      {/* Top Ingestion & Readiness Banner */}
+      <div
+        className="studio-status-banner"
+        style={{
+          backgroundColor: isPhotoUploadComplete
+            ? 'var(--px-status-success-bg)'
+            : 'var(--px-brand-iris-subtle)',
+          borderColor: isPhotoUploadComplete
+            ? 'var(--px-status-success-border)'
+            : 'var(--px-brand-iris-border)',
+          color: isPhotoUploadComplete
+            ? 'var(--px-status-success-text)'
+            : 'var(--px-brand-iris-active)'
+        }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
           {isPhotoUploadComplete ? (
-            <CheckCircle2 size={18} color="#10B981" />
+            <Check size={16} strokeWidth={2} />
           ) : (
-            <Loader2 size={18} color="#3B82F6" className="animate-spin" />
+            <RefreshCw size={16} strokeWidth={2} className="animate-spin" />
           )}
-          <span style={{ fontWeight: 600, color: isPhotoUploadComplete ? '#065F46' : '#1E40AF' }}>
+          <span style={{ fontWeight: 600 }}>
             {isPhotoUploadComplete
-              ? `✅ ${uploadedCount} Photos Uploaded & Colors Extracted in Background!`
-              : `⚡ Uploading & Downsampling ${uploadedCount} Photos in Background...`}
+              ? `${uploadedCount} Photos Verified & Color Harmonies Indexed`
+              : `Indexing & Downsampling ${uploadedCount} Photos in Background...`}
           </span>
         </div>
-        <span style={{ fontSize: '0.75rem', color: '#6B7280', fontWeight: 500 }}>Parallel AI Engine Active</span>
+        <span className="studio-status-meta">Guided Story Studio</span>
       </div>
 
-      {/* Chat Messages Container */}
-      <div className="chat-messages-scroll" style={{
-        maxHeight: '280px',
-        overflowY: 'auto',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '1rem',
-        paddingRight: '0.5rem',
-        marginBottom: '1.5rem'
-      }}>
-        {messages.map((msg, idx) => (
-          <div
-            key={idx}
-            style={{
-              display: 'flex',
-              gap: '0.75rem',
-              alignSelf: msg.sender === 'user' ? 'flex-end' : 'flex-start',
-              maxWidth: '85%'
-            }}
-          >
-            {msg.sender === 'ai' && (
-              <div style={{
-                width: '36px',
-                height: '36px',
-                borderRadius: '50%',
-                background: 'linear-gradient(135deg, #8B5CF6, #EC4899)',
-                display: 'flex',
-                alignItems: 'center',
-                justify: 'center',
-                color: 'white',
-                flexShrink: 0
-              }}>
-                <Bot size={20} />
-              </div>
-            )}
+      <div className="studio-header">
+        <h2>Design Your Editorial Photobook</h2>
+        <p>
+          Configure your narrative direction, cover jacket typography, and inner
+          spread layout density before synthesizing your three bespoke book
+          editions.
+        </p>
+      </div>
 
-            <div style={{
-              padding: '0.85rem 1.15rem',
-              borderRadius: msg.sender === 'user' ? '18px 18px 2px 18px' : '18px 18px 18px 2px',
-              background: msg.sender === 'user' ? '#8B5CF6' : '#F3F4F6',
-              color: msg.sender === 'user' ? 'white' : '#1F2937',
-              fontSize: '0.92rem',
-              lineHeight: 1.5,
-              boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
-            }}>
-              {msg.text}
-            </div>
+      {/* Stage 1: Occasion Narrative & Category Chips */}
+      <section className="studio-section">
+        <div className="studio-section-header">
+          <span className="studio-stage-Index">01</span>
+          <div>
+            <h3>Story &amp; Occasion Narrative</h3>
+            <p>Describe the setting, people, or mood of your collection.</p>
           </div>
-        ))}
-        <div ref={chatEndRef} />
-      </div>
-
-      {/* Quick Suggestion Pills */}
-      <div style={{ marginBottom: '1.25rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: '#6B7280', marginBottom: '0.5rem' }}>
-          <Compass size={14} />
-          <span>Quick Occasion Ideas:</span>
         </div>
-        <div className="pill-container" style={{ gap: '0.5rem' }}>
-          {SUGGESTED_OCCASIONS.map((tag, idx) => (
-            <button
-              key={idx}
-              className="pill-tag"
-              style={{ fontSize: '0.8rem', padding: '0.35rem 0.85rem' }}
-              onClick={() => handleSend(tag)}
-              disabled={isLoading}
-            >
-              {tag}
-            </button>
-          ))}
-        </div>
-      </div>
 
-      {/* Interactive Input Form */}
-      <form onSubmit={(e) => { e.preventDefault(); handleSend(); }} style={{ display: 'flex', gap: '0.75rem' }}>
-        <input
-          type="text"
-          value={inputVal}
-          onChange={(e) => setInputVal(e.target.value)}
-          placeholder="Type occasion details (e.g. Friends visit to Kanpur Temple)..."
-          style={{
-            flex: 1,
-            padding: '0.85rem 1.25rem',
-            borderRadius: '24px',
-            border: '1px solid #D1D5DB',
-            fontSize: '0.95rem',
-            outline: 'none',
-            fontFamily: 'inherit'
-          }}
+        <div className="studio-pill-row">
+          <span className="studio-pill-label">
+            <Compass size={14} strokeWidth={1.75} />
+            <span>Occasion Presets</span>
+          </span>
+          <div className="pill-container">
+            {OCCASION_PILLS.map((pill) => {
+              const active = selectedPill === pill;
+              return (
+                <button
+                  key={pill}
+                  type="button"
+                  className={`pill-tag ${active ? 'active' : ''}`}
+                  onClick={() => handleSelectPill(pill)}
+                  disabled={isLoading}
+                >
+                  {pill}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <textarea
+          className="studio-textarea"
+          rows={2}
+          value={promptInput}
+          onChange={handlePromptChange}
+          placeholder="Describe your story or occasion (e.g., Summer coastal road trip along Big Sur with family)..."
           disabled={isLoading}
         />
+      </section>
+
+      {/* Stage 2: Cover Title Studio */}
+      <section className="studio-section">
+        <div className="studio-section-header" style={{ justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+            <span className="studio-stage-Index">02</span>
+            <div>
+              <h3>Cover Title Studio</h3>
+              <p>Brainstorm editorial titles with AI or enter your own jacket title.</p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="btn btn-secondary studio-ai-btn"
+            onClick={handleSuggestTitles}
+            disabled={isLoading || isSuggestingTitles}
+          >
+            {isSuggestingTitles ? (
+              <RefreshCw size={15} strokeWidth={1.75} className="animate-spin" />
+            ) : (
+              <Sparkles size={15} strokeWidth={1.75} color="var(--px-brand-iris)" />
+            )}
+            <span>{isSuggestingTitles ? 'Curating Titles...' : 'Generate AI Titles'}</span>
+          </button>
+        </div>
+
+        {/* Shimmer Loading State */}
+        {isSuggestingTitles && (
+          <div className="studio-title-grid">
+            {[0, 1, 2, 3].map((n) => (
+              <div key={n} className="px-shimmer-card" />
+            ))}
+          </div>
+        )}
+
+        {/* 4 Selectable AI Title Cards */}
+        {!isSuggestingTitles && suggestions && suggestions.titles && (
+          <div className="studio-title-grid">
+            {suggestions.titles.slice(0, 4).map((title, idx) => {
+              const sub =
+                (suggestions.subtitles &&
+                  suggestions.subtitles[idx % suggestions.subtitles.length]) ||
+                'A COLLECTION OF MEMORIES';
+              const isSelected = selectedTitleIdx === idx;
+              return (
+                <button
+                  key={idx}
+                  type="button"
+                  className={`studio-title-card ${isSelected ? 'selected' : ''}`}
+                  onClick={() => handlePickSuggestedCard(idx)}
+                >
+                  <div className="studio-title-card-top">
+                    <Type size={14} strokeWidth={1.75} color="var(--px-brand-iris)" />
+                    {isSelected && (
+                      <span className="studio-card-check">
+                        <Check size={12} strokeWidth={2.5} />
+                      </span>
+                    )}
+                  </div>
+                  <div className="studio-title-card-main">{title}</div>
+                  <div className="studio-title-card-sub">{sub}</div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Custom Title & Subtitle Inline Fields */}
+        <div className="studio-custom-title-row">
+          <div className="studio-input-group">
+            <label>
+              <Edit3 size={13} strokeWidth={1.75} />
+              <span>Custom Cover Title</span>
+            </label>
+            <input
+              type="text"
+              className="studio-input"
+              value={customTitle}
+              onChange={handleCustomTitleInput}
+              placeholder="Enter custom cover title (optional)..."
+              disabled={isLoading}
+            />
+          </div>
+          <div className="studio-input-group">
+            <label>
+              <Type size={13} strokeWidth={1.75} />
+              <span>Cover Subtitle</span>
+            </label>
+            <input
+              type="text"
+              className="studio-input"
+              value={customSubtitle}
+              onChange={handleCustomSubtitleInput}
+              placeholder="e.g., AUTUMN 2026 • ARCHIVE EDITION"
+              disabled={isLoading}
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* Stage 3: Layout Content Mode */}
+      <section className="studio-section">
+        <div className="studio-section-header">
+          <span className="studio-stage-Index">03</span>
+          <div>
+            <h3>Inner Spread Layout Mode</h3>
+            <p>Choose whether inner pages include editorial story captions or pure photography.</p>
+          </div>
+        </div>
+
+        <div className="studio-mode-grid">
+          <button
+            type="button"
+            className={`studio-mode-card ${includeText ? 'selected' : ''}`}
+            onClick={() => setIncludeText(true)}
+            disabled={isLoading}
+          >
+            <div className="studio-mode-icon">
+              <BookOpen size={18} strokeWidth={1.75} />
+            </div>
+            <div className="studio-mode-body">
+              <div className="studio-mode-title">
+                <span>Include Narrative Captions</span>
+                {includeText && <Check size={15} strokeWidth={2.25} color="var(--px-brand-iris)" />}
+              </div>
+              <p>
+                Pairs chapter openers and curated story captions alongside your photographs.
+              </p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            className={`studio-mode-card ${!includeText ? 'selected' : ''}`}
+            onClick={() => setIncludeText(false)}
+            disabled={isLoading}
+          >
+            <div className="studio-mode-icon">
+              <Image size={18} strokeWidth={1.75} />
+            </div>
+            <div className="studio-mode-body">
+              <div className="studio-mode-title">
+                <span>Photo-Only Layouts (No Text)</span>
+                {!includeText && <Check size={15} strokeWidth={2.25} color="var(--px-brand-iris)" />}
+              </div>
+              <p>
+                Allocates 100% of every inner spread exclusively to photography with zero text slots.
+              </p>
+            </div>
+          </button>
+        </div>
+      </section>
+
+      {/* Stage 4: Summary Review & Launch Action */}
+      <section className="studio-launch-bar">
+        <div className="studio-summary-meta">
+          <div className="studio-summary-item">
+            <span className="studio-summary-label">Cover Jacket</span>
+            <span className="studio-summary-value">{displayTitlePreview}</span>
+          </div>
+          <div className="studio-summary-divider" />
+          <div className="studio-summary-item">
+            <span className="studio-summary-label">Subtitle</span>
+            <span className="studio-summary-value">{displaySubtitlePreview}</span>
+          </div>
+          <div className="studio-summary-divider" />
+          <div className="studio-summary-item">
+            <span className="studio-summary-label">Inner Spreads</span>
+            <span className="studio-summary-badge">
+              {includeText ? 'Narrative Captions' : 'Photo-Only (Zero Text)'}
+            </span>
+          </div>
+        </div>
+
         <button
-          type="submit"
-          className="btn btn-primary"
-          style={{ borderRadius: '24px', padding: '0.85rem 1.5rem' }}
-          disabled={isLoading || !inputVal.trim()}
+          type="button"
+          className="btn btn-primary studio-launch-btn"
+          onClick={handleLaunchGeneration}
+          disabled={isLoading}
         >
-          {isLoading ? (
-            <Loader2 size={18} className="animate-spin" />
-          ) : (
-            <>
-              <span>Send & Generate</span>
-              <Send size={16} />
-            </>
-          )}
+          <Sparkles size={16} strokeWidth={1.75} />
+          <span>Generate Photobook Variations</span>
+          <ArrowRight size={16} strokeWidth={1.75} />
         </button>
-      </form>
+      </section>
     </div>
   );
 }
