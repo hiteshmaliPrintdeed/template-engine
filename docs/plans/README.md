@@ -107,9 +107,9 @@ Measured numbers and the capacity figure: [LOAD-RESULTS.md](LOAD-RESULTS.md).
 | 1.5 | **Done** | | 72 tests green. `cover_photos: List[CoverPhoto]` + backend-owned `cover_style`; hero-ranked non-overlapping selection with aspect affinity; per-variation pacing (`spread counts [10, 15, 8]`, 3/3 distinct structures); `BookCarousel3D` consumes real photo lists. Golden + determinism tests. |
 | 1.6 | **Done** | | The fake-photobook fallback lived inside `process_async_job`, which 1.4 rewrote — removing it there avoided rewriting the same function twice. Jobs with no photos now fail honestly. Remaining 1.6 items (placeholder paths in `solver.py`/`pdf_exporter.py`, `ensure_sample_placeholders`) still open. |
 | 1.7 | **Done** | | 98 tests green. Synthetic corpus (contract verified against every filter gate), load harness, CI. **20 users PASS, /health p99 1.8ms.** Threads beat processes. Found + fixed a face-detector thread-safety crash. See [LOAD-RESULTS.md](LOAD-RESULTS.md). |
-| 2.1 | Not started | | |
-| 2.2 | Not started | | |
-| 2.3 | Not started | | |
+| 2.1 | **Done** | | OffscreenCanvas Web Worker pool (`downsample.worker.js` + `WorkerPool`), zero-dependency JPEG APP1 EXIF/GPS parser (`exif.js`), main-thread fallback, hoisted downsampler ref, and 60-tile bounded preview grid. |
+| 2.2 | **Done** | | `ProgressBus` pub/sub (`backend/app/progress.py`), `GET /api/jobs/{job_id}/stream` SSE endpoint, per-spread solver `on_progress` callback, `useJobProgress` client hook with 2s polling fallback and unmount cleanup, and zero `setInterval` in `App.jsx`. |
+| 2.3 | **Done** | | `PhotoFrame` component (reserved `aspectRatio` + `dominant_colors` gradient placeholder), optimistic local blob previews reconciled with server curation states (`pending`/`kept`/`rejected`), early `themes_ready` skeleton covers, 3-spread virtualization buffer + low-priority prefetch, and GPU-composited step transitions. |
 | 2.4 | Not started | | |
 | 3.1 | **Done** | | Removed `BoilerplateInspector`, `SystemStatsDashboard`, `EmotionThemeSelector`, duplicate spread shuffle button, and all emojis across UI & backend. |
 | 3.2 | **Done** | | Guided Story Studio configurator, `/api/chat/suggest-titles` with session caching, `include_text` gating across both `solver.py` caption branches and `dsa_solver.py` spread reshuffle, and session-persisted reshuffle preferences. |

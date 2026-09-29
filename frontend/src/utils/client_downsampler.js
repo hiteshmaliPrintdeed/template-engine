@@ -1,16 +1,28 @@
 /**
- * Pixovo Phase 1 — Client-Side Downsampling & Dual Payload Ingestion Module
- * ------------------------------------------------------------------------
- * Downsamples raw high-resolution images (4K/8K JPEGs, PNGs, WebP) in the browser
- * to 512px thumbnails (~30-40KB per image) using HTML5 Canvas.
- * Extracts EXIF metadata and generates unique photo_ids before backend ingestion.
+ * Pixovo Stage 2.1 — Client-Side Worker Downsampling & Chunked Ingestion Module
+ * -----------------------------------------------------------------------------
+ * Downsamples raw high-resolution images (4K/8K JPEGs, PNGs, WebP) in a bounded
+ * Web Worker pool using OffscreenCanvas + createImageBitmap (with automatic
+ * fallback to main-thread HTML5 Canvas when OffscreenCanvas is unavailable).
+ * Extracts EXIF DateTimeOriginal & GPS metadata from the raw file header before
+ * canvas encoding strips APP1 metadata.
  */
+
+import { WorkerPool, getOptimalWorkerCount } from './worker_pool';
+import { parseExif } from '../workers/exif';
+
+export const SUPPORTS_WORKER_CANVAS =
+  typeof Worker !== 'undefined' &&
+  typeof OffscreenCanvas !== 'undefined' &&
+  typeof createImageBitmap !== 'undefined';
 
 export class PixovoClientDownsampler {
   constructor(options = {}) {
     this.maxDimension = options.maxDimension || 512;
     this.quality = options.quality || 0.85;
-    this.concurrency = options.concurrency || 4;
+    this.concurrency = options.concurrency || getOptimalWorkerCount();
+    this.useWorkers = options.useWorkers !== undefined ? options.useWorkers : SUPPORTS_WORKER_CANVAS;
+    this.pool = null;
   }
 
   /**
@@ -21,13 +33,26 @@ export class PixovoClientDownsampler {
   }
 
   /**
-   * Downsample a single File object to a 512px thumbnail and extract metadata.
+   * Terminate the underlying Web Worker pool if active.
+   */
+  terminate() {
+    if (this.pool) {
+      this.pool.terminate();
+      this.pool = null;
+    }
+  }
+
+  /**
+   * Main-thread fallback: Downsample a single File object using DOM Canvas and extract EXIF.
+   * Retained for Safari < 16.4 or environments without OffscreenCanvas.
    * @param {File} file - Raw image file from input/dropzone
+   * @param {string} [existingPhotoId] - Optional pre-minted photo_id
    * @returns {Promise<Object>} Processed photo object with thumbnail and metadata
    */
-  async processSinglePhoto(file) {
-    const photoId = this.generatePhotoId();
+  async processSinglePhoto(file, existingPhotoId = null) {
+    const photoId = existingPhotoId || this.generatePhotoId();
     const startTime = performance.now();
+    const exif = await parseExif(file);
 
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -35,24 +60,22 @@ export class PixovoClientDownsampler {
 
       img.onload = () => {
         try {
-          // Calculate target dimensions maintaining aspect ratio
           let width = img.width;
           let height = img.height;
           const nativeAspectRatio = width / Math.max(1, height);
 
           if (width > height) {
             if (width > this.maxDimension) {
-              height = Math.round((height * this.maxDimension) / width);
+              height = Math.max(1, Math.round((height * this.maxDimension) / width));
               width = this.maxDimension;
             }
           } else {
             if (height > this.maxDimension) {
-              width = Math.round((width * this.maxDimension) / height);
+              width = Math.max(1, Math.round((width * this.maxDimension) / height));
               height = this.maxDimension;
             }
           }
 
-          // Create offscreen canvas for fast rendering
           const canvas = document.createElement('canvas');
           canvas.width = width;
           canvas.height = height;
@@ -62,16 +85,15 @@ export class PixovoClientDownsampler {
           ctx.imageSmoothingQuality = 'high';
           ctx.drawImage(img, 0, 0, width, height);
 
-          // Export canvas as lightweight WebP/JPEG blob
           canvas.toBlob(
             (blob) => {
               URL.revokeObjectURL(url);
 
-              // Metadata extraction
-              const timestamp = file.lastModified
-                ? new Date(file.lastModified).toISOString()
-                : new Date().toISOString();
-
+              const fallbackEpoch = file.lastModified
+                ? Math.floor(file.lastModified / 1000)
+                : Math.floor(Date.now() / 1000);
+              const timestampEpoch = exif.timestamp_epoch || fallbackEpoch;
+              const timestamp = exif.timestamp_iso || new Date(timestampEpoch * 1000).toISOString();
               const processingTimeMs = Math.round(performance.now() - startTime);
 
               resolve({
@@ -84,6 +106,10 @@ export class PixovoClientDownsampler {
                 aspect_ratio: parseFloat(nativeAspectRatio.toFixed(4)),
                 orientation: nativeAspectRatio >= 1.2 ? 'LANDSCAPE' : (nativeAspectRatio <= 0.8 ? 'PORTRAIT' : 'SQUARE'),
                 timestamp: timestamp,
+                timestamp_epoch: timestampEpoch,
+                timestamp_source: exif.timestamp_epoch ? 'exif' : 'file_mtime',
+                latitude: exif.latitude ?? null,
+                longitude: exif.longitude ?? null,
                 thumbnail_blob: blob,
                 thumbnail_size_bytes: blob ? blob.size : 0,
                 processing_time_ms: processingTimeMs
@@ -98,7 +124,7 @@ export class PixovoClientDownsampler {
         }
       };
 
-      img.onerror = (err) => {
+      img.onerror = () => {
         URL.revokeObjectURL(url);
         reject(new Error(`Failed to load image file: ${file.name}`));
       };
@@ -108,18 +134,75 @@ export class PixovoClientDownsampler {
   }
 
   /**
-   * Batch process multiple files concurrently without freezing the browser UI thread.
+   * Batch process multiple files using the OffscreenCanvas Web Worker pool
+   * (or main-thread fallback if unsupported) without freezing the UI thread.
    * @param {FileList|Array<File>} fileList - List of raw image files
    * @param {Function} onProgress - Progress callback function (completed, total, currentItem)
    * @returns {Promise<Array<Object>>} Array of processed photo objects
    */
   async processBatch(fileList, onProgress = null) {
-    const files = Array.from(fileList).filter(f => f.type.startsWith('image/') || f.name.match(/\.(jpg|jpeg|png|webp|heic|tiff)$/i));
+    const files = Array.from(fileList).filter(
+      f => f.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|tiff)$/i.test(f.name)
+    );
     const total = files.length;
+    if (total === 0) return [];
+
+    // Worker pool path (Stage 2.1)
+    if (this.useWorkers && SUPPORTS_WORKER_CANVAS) {
+      if (!this.pool || this.pool.terminated) {
+        this.pool = new WorkerPool(
+          () => new Worker(new URL('../workers/downsample.worker.js', import.meta.url), { type: 'module' }),
+          this.concurrency
+        );
+      }
+
+      let completed = 0;
+      const results = await Promise.all(
+        files.map(async (file) => {
+          const photoId = this.generatePhotoId();
+          const startTime = performance.now();
+          try {
+            const r = await this.pool.run({
+              photoId,
+              file,
+              maxDimension: this.maxDimension,
+              quality: this.quality,
+            });
+            const item = {
+              ...r,
+              photo_id: photoId,
+              filename: file.name,
+              original_file: file,
+              original_size_bytes: file.size,
+              processing_time_ms: Math.round(performance.now() - startTime),
+            };
+            completed++;
+            onProgress?.(completed, total, item);
+            return item;
+          } catch (err) {
+            // Automatic fallback to main-thread decode if worker fails for a specific file
+            try {
+              const fallbackItem = await this.processSinglePhoto(file, photoId);
+              completed++;
+              onProgress?.(completed, total, fallbackItem);
+              return fallbackItem;
+            } catch (fallbackErr) {
+              console.warn(`[Downsampler] Skipping ${file.name}:`, fallbackErr);
+              completed++;
+              onProgress?.(completed, total, { filename: file.name, error: fallbackErr.message });
+              return null;
+            }
+          }
+        })
+      );
+
+      return results.filter(Boolean);
+    }
+
+    // Main-thread fallback path (Safari < 16.4 or forced fallback)
     const results = [];
     let completed = 0;
 
-    // Process in chunks based on concurrency limit
     for (let i = 0; i < files.length; i += this.concurrency) {
       const chunk = files.slice(i, i + this.concurrency);
       const chunkPromises = chunk.map(async (file) => {
@@ -129,7 +212,7 @@ export class PixovoClientDownsampler {
           if (onProgress) onProgress(completed, total, result);
           return result;
         } catch (err) {
-          console.warn(`[Pixovo Downsampler] Skipping corrupt file ${file.name}:`, err);
+          console.warn(`[Downsampler] Skipping corrupt file ${file.name}:`, err);
           completed++;
           if (onProgress) onProgress(completed, total, { filename: file.name, error: err.message });
           return null;
@@ -157,19 +240,6 @@ export class PixovoClientDownsampler {
 
   /**
    * Build ONE ingest chunk payload: 512px thumbnails + metadata JSON only.
-   *
-   * Full-resolution originals are deliberately NOT included. They stream
-   * separately via /api/upload-originals. The previous buildDualPayload()
-   * packed every thumbnail AND every original into a single FormData, which at
-   * 1,000 photos x ~8MB produced a ~8GB single POST that exhausted browser
-   * memory before reaching the network — and then uploaded those same originals
-   * a second time via the background sync.
-   *
-   * @param {Array<Object>} processedPhotos - one chunk's worth of processed photos
-   * @param {string} sessionId   - session token from POST /api/sessions
-   * @param {number} chunkIndex  - 0-based index of this chunk
-   * @param {number} chunkCount  - total number of chunks in this upload
-   * @returns {FormData}
    */
   buildChunkPayload(processedPhotos, sessionId, chunkIndex, chunkCount) {
     const formData = new FormData();
@@ -180,12 +250,9 @@ export class PixovoClientDownsampler {
         formData.append('thumbnails', photo.thumbnail_blob, `${photo.photo_id}_thumb.jpg`);
       }
 
-      // Canvas downsampling strips EXIF, so the backend's own capture-time read
-      // on the thumbnail will usually miss. Carry the file's lastModified as a
-      // fallback so chronological chaptering has something real to sort on.
-      // (Consumed by Stage 1.2; true EXIF/GPS extraction lands in Stage 2.1.)
       const tsMs = Date.parse(photo.timestamp);
-      const timestampEpoch = Number.isFinite(tsMs) ? Math.floor(tsMs / 1000) : 0;
+      const fallbackEpoch = Number.isFinite(tsMs) ? Math.floor(tsMs / 1000) : 0;
+      const timestampEpoch = photo.timestamp_epoch || fallbackEpoch;
 
       metadataArray.push({
         photo_id: photo.photo_id,
@@ -197,6 +264,9 @@ export class PixovoClientDownsampler {
         orientation: photo.orientation,
         timestamp: photo.timestamp,
         timestamp_epoch: timestampEpoch,
+        timestamp_source: photo.timestamp_source || 'file_mtime',
+        latitude: photo.latitude ?? null,
+        longitude: photo.longitude ?? null,
         thumbnail_size_bytes: photo.thumbnail_size_bytes
       });
     });

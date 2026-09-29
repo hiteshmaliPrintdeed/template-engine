@@ -1,19 +1,26 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AlertTriangle } from 'lucide-react';
+import PhotoFrame from './PhotoFrame';
 
-export default function SpreadViewer({ selectedVariation, targetRef, onSpreadUpdate, sessionId }) {
+export default function SpreadViewer({
+  selectedVariation,
+  targetRef,
+  onSpreadUpdate,
+  sessionId,
+  photoLookup = {}
+}) {
   const [reshufflingIdx, setReshufflingIdx] = useState(null);
   const [seedCounters, setSeedCounters] = useState({});
   const [scrollTop, setScrollTop] = useState(0);
 
   const containerRef = useRef(null);
 
-  if (!selectedVariation || !selectedVariation.spreads) return null;
+  const spreads = selectedVariation?.spreads || [];
+  const totalSpreads = spreads.length;
 
-  // Windowing calculations (Estimated spread container height ~520px)
+  // Stage 2.3 Task 5: Widen virtualization buffer from 2 to 3 spreads above and below viewport
   const SPREAD_ESTIMATED_HEIGHT = 520;
-  const BUFFER_COUNT = 2; // Render 2 spreads above and 2 spreads below viewport
-  const totalSpreads = selectedVariation.spreads.length;
+  const BUFFER_COUNT = 3;
 
   useEffect(() => {
     const handleScroll = () => {
@@ -29,7 +36,6 @@ export default function SpreadViewer({ selectedVariation, targetRef, onSpreadUpd
   let topSpacerHeight = 0;
   let bottomSpacerHeight = 0;
 
-  // Only apply windowing virtualization if album has more than 8 spreads
   if (totalSpreads > 8) {
     const containerTop = containerRef.current ? containerRef.current.offsetTop : 300;
     const relativeScroll = Math.max(0, scrollTop - containerTop);
@@ -42,16 +48,40 @@ export default function SpreadViewer({ selectedVariation, targetRef, onSpreadUpd
     bottomSpacerHeight = Math.max(0, (totalSpreads - endIdx) * SPREAD_ESTIMATED_HEIGHT);
   }
 
-  const visibleSpreads = selectedVariation.spreads.slice(startIdx, endIdx);
+  // Stage 2.3 Task 5: Prefetch the next 2 spreads' images at low priority
+  useEffect(() => {
+    if (!totalSpreads || endIdx >= totalSpreads) return;
+    const upcomingSpreads = spreads.slice(endIdx, Math.min(totalSpreads, endIdx + 2));
+    const urls = [];
+    upcomingSpreads.forEach((sp) => {
+      const slots = [...(sp.left_page?.slots || []), ...(sp.right_page?.slots || [])];
+      slots.forEach((slot) => {
+        if (slot.type === 'photo' && slot.photo_url) {
+          urls.push(slot.photo_url);
+        }
+      });
+    });
 
-  const fontStyle = selectedVariation.theme_name === "Devotional / Temple" || selectedVariation.id === "var_2"
-    ? "'Playfair Display', 'Lora', serif"
-    : "'Outfit', 'Inter', sans-serif";
+    urls.forEach((url) => {
+      const img = new Image();
+      img.fetchPriority = 'low';
+      img.src = url;
+    });
+  }, [endIdx, totalSpreads, spreads]);
+
+  if (!selectedVariation || !selectedVariation.spreads) return null;
+
+  const visibleSpreads = spreads.slice(startIdx, endIdx);
+
+  const fontStyle =
+    selectedVariation.theme_name === 'Devotional / Temple' || selectedVariation.id === 'var_2'
+      ? "'Playfair Display', 'Lora', serif"
+      : "'Outfit', 'Inter', sans-serif";
 
   const handleSpreadClick = async (spread, originalIdx) => {
     setReshufflingIdx(originalIdx);
     const nextSeed = (seedCounters[originalIdx] || 1) + 1;
-    setSeedCounters(prev => ({ ...prev, [originalIdx]: nextSeed }));
+    setSeedCounters((prev) => ({ ...prev, [originalIdx]: nextSeed }));
 
     try {
       const res = await fetch('/api/spreads/reshuffle', {
@@ -59,7 +89,7 @@ export default function SpreadViewer({ selectedVariation, targetRef, onSpreadUpd
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           spread: spread,
-          theme_name: selectedVariation.theme_name || "Warm",
+          theme_name: selectedVariation.theme_name || 'Warm',
           seed: nextSeed,
           session_id: sessionId || null
         })
@@ -72,7 +102,7 @@ export default function SpreadViewer({ selectedVariation, targetRef, onSpreadUpd
         }
       }
     } catch (err) {
-      console.error("Spread reshuffle error:", err);
+      console.error('Spread reshuffle error:', err);
     } finally {
       setReshufflingIdx(null);
     }
@@ -141,9 +171,15 @@ export default function SpreadViewer({ selectedVariation, targetRef, onSpreadUpd
               {/* Central Spine Gutter Fold Shadow */}
               <div className="spine-gutter" />
 
-              {/* Render Slots Positioned Directly on Spread (Zero Fake Card Boxes) */}
+              {/* Render Slots Positioned Directly on Spread using PhotoFrame */}
               {allSlots.map((slot, sIdx) => {
                 if (slot.type === 'photo' && slot.photo_url) {
+                  const meta = slot.photo_id ? photoLookup[slot.photo_id] : null;
+                  const dominantColors = meta?.dominant_colors || [
+                    selectedVariation.base_color || '#E4E4E7',
+                    selectedVariation.accent_color || '#D4D4D8'
+                  ];
+
                   return (
                     <div
                       key={sIdx}
@@ -158,44 +194,49 @@ export default function SpreadViewer({ selectedVariation, targetRef, onSpreadUpd
                         border: 'none'
                       }}
                     >
-                      <img
+                      <PhotoFrame
                         src={slot.photo_url}
+                        aspectRatio={null}
+                        dominantColors={dominantColors}
                         alt="Spread photo"
                         style={{
                           width: '100%',
                           height: '100%',
-                          objectFit: 'cover',
                           boxShadow: '0 4px 14px rgba(0, 0, 0, 0.12)',
                           borderRadius: '2px'
                         }}
-                      />
-                      {/* Pre-Flight Print DPI Warning Badge */}
-                      {slot.dpi_quality && slot.dpi_quality !== 'excellent' && (
-                        <div
-                          title={`Pre-Flight Check: ${slot.effective_dpi ? `${slot.effective_dpi} DPI` : 'Low Resolution'} - ${slot.dpi_quality === 'alert' ? 'Image may look pixelated when printed' : 'Acceptable quality, higher resolution recommended'}`}
-                          style={{
-                            position: 'absolute',
-                            top: '4px',
-                            right: '4px',
-                            backgroundColor: slot.dpi_quality === 'alert' ? 'rgba(239, 68, 68, 0.92)' : 'rgba(245, 158, 11, 0.92)',
-                            color: '#FFFFFF',
-                            fontSize: '9px',
-                            fontWeight: '600',
-                            padding: '2px 5px',
-                            borderRadius: '3px',
-                            backdropFilter: 'blur(4px)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '3px',
-                            boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-                            pointerEvents: 'auto',
-                            zIndex: 10
-                          }}
-                        >
-                          <AlertTriangle size={12} strokeWidth={2} />
-                          <span>{slot.effective_dpi ? `${Math.round(slot.effective_dpi)} DPI` : 'Low DPI'}</span>
-                        </div>
-                      )}
+                        imgStyle={{
+                          borderRadius: '2px'
+                        }}
+                      >
+                        {/* Pre-Flight Print DPI Warning Badge */}
+                        {slot.dpi_quality && slot.dpi_quality !== 'excellent' && (
+                          <div
+                            title={`Pre-Flight Check: ${slot.effective_dpi ? `${slot.effective_dpi} DPI` : 'Low Resolution'} - ${slot.dpi_quality === 'alert' ? 'Image may look pixelated when printed' : 'Acceptable quality, higher resolution recommended'}`}
+                            style={{
+                              position: 'absolute',
+                              top: '4px',
+                              right: '4px',
+                              backgroundColor: slot.dpi_quality === 'alert' ? 'rgba(239, 68, 68, 0.92)' : 'rgba(245, 158, 11, 0.92)',
+                              color: '#FFFFFF',
+                              fontSize: '9px',
+                              fontWeight: '600',
+                              padding: '2px 5px',
+                              borderRadius: '3px',
+                              backdropFilter: 'blur(4px)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '3px',
+                              boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                              pointerEvents: 'auto',
+                              zIndex: 10
+                            }}
+                          >
+                            <AlertTriangle size={12} strokeWidth={2} />
+                            <span>{slot.effective_dpi ? `${Math.round(slot.effective_dpi)} DPI` : 'Low DPI'}</span>
+                          </div>
+                        )}
+                      </PhotoFrame>
                     </div>
                   );
                 }
@@ -224,7 +265,7 @@ export default function SpreadViewer({ selectedVariation, targetRef, onSpreadUpd
 
             {/* Footer Page Numbers */}
             <div className="page-footer-num" style={{ fontFamily: fontStyle }}>
-              {originalIdx === 0 ? "Front Inside & Page 1" : `${left.page_number} & ${right.page_number}`}
+              {originalIdx === 0 ? 'Front Inside & Page 1' : `${left.page_number} & ${right.page_number}`}
             </div>
           </div>
         );

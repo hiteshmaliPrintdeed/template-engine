@@ -5,7 +5,7 @@ Applies 20 Canonical Themes with 5 Semantic Color Roles (background, surface, pr
 Supports exact 3 persistent saved book variations & on-click spread reshuffling.
 """
 
-from typing import List, Dict, Any, Set, Optional
+from typing import List, Dict, Any, Set, Optional, Callable
 from app.schemas.photobook import (
     PhotoMeta, TemplateSlot, SinglePage, SpreadPair, PhotobookVariation
 )
@@ -33,6 +33,7 @@ def generate_photobook_variations_engine(
     custom_title: Optional[str] = None,
     include_text: bool = True,
     subtitle: Optional[str] = None,
+    on_progress: Optional[Callable[[int, int, int], None]] = None,
 ) -> List[PhotobookVariation]:
     """
     Generates exactly 3 distinct persistent Photobook Variations applying
@@ -78,6 +79,7 @@ def generate_photobook_variations_engine(
         spread_idx = 1
 
         # Tier 2: Micro-Clustering (Shell & Core pHash Visual Similarity per Chapter)
+        chapter_chunk_lists = []
         for ch in macro_chapters:
             ch_photos = ch.get("photos", [])
             ch_title = ch.get("chapter_title", "")
@@ -86,7 +88,11 @@ def generate_photobook_variations_engine(
             if len(ch_photos) <= 4:
                 chunk_size = max(2, chunk_size - 1)
             photo_chunks = cluster_photos_2tier_engine(ch_photos, chunk_size=chunk_size)
+            chapter_chunk_lists.append((ch_title, photo_chunks))
 
+        total_var_spreads = max(1, sum(len(chunks) for _, chunks in chapter_chunk_lists))
+
+        for ch_title, photo_chunks in chapter_chunk_lists:
             for c_i, chunk in enumerate(photo_chunks):
                 # Stage 3.2: Gate BOTH caption branches (chapter-title and rotation) on include_text
                 if not include_text:
@@ -105,6 +111,11 @@ def generate_photobook_variations_engine(
                     family_variant_seed=variant_seed_offset + spread_idx
                 )
                 spreads.append(spread)
+                if on_progress is not None:
+                    try:
+                        on_progress(spread_idx, total_var_spreads, var_idx)
+                    except Exception:
+                        pass
                 spread_idx += 1
 
         # Stage 1.5: hero-ranked, non-overlapping cover set for this variation.

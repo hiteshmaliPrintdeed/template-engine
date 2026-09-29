@@ -8,6 +8,7 @@ and Aspect Ratio clamping (0.33 to 3.0).
 import os
 import uuid
 import time
+import json
 import asyncio
 import shutil
 import secrets
@@ -20,7 +21,7 @@ Image.MAX_IMAGE_PIXELS = 50_000_000
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -47,10 +48,12 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from cachetools import TTLCache
 from app.db.session_store import SessionStore
-from app.engine.color_extractor import extract_dominant_colors
+from app.engine.color_extractor import extract_dominant_colors, THEME_PALETTES
+from app.engine.cover_selector import COVER_STYLES
 from app.engine.story_ai import generate_story_theme_batch, suggest_creative_titles
 from app.engine.solver import generate_photobook_variations_engine
 from app.engine.pdf_exporter import generate_print_pdf_engine
+from app.progress import progress_bus
 from app.engine.filter.filter_engine import (
     Phase1FilterEngine, scan_photo, finalise_scanned_batch
 )
@@ -493,7 +496,14 @@ async def ingest_photobook_dual_payload(
 
         # Segregate Survived vs Rejected Photos
         survived_photos_list = [p for p in filter_result.get("all_scanned_photos", []) if p.get("status") == "PASSED"]
-        rejected_photos_list = [p for p in filter_result.get("all_scanned_photos", []) if p.get("status") != "PASSED"]
+        rejected_photos_list = []
+        for p in filter_result.get("all_scanned_photos", []):
+            if p.get("status") != "PASSED":
+                r_stem = Path(p.get("filename", "")).stem
+                if r_stem.endswith("_thumb"):
+                    r_stem = r_stem[: -len("_thumb")]
+                p["photo_id"] = r_stem
+                rejected_photos_list.append(p)
 
         # 4. Populate PhotoMeta and PHOTO_STORE for survived photos only.
         #
@@ -521,20 +531,13 @@ async def ingest_photobook_dual_payload(
             thumb_key = storage_key("thumbnails", session_id, f"{p_id}_thumb.jpg")
             web_thumb_url = STORAGE.url_for(thumb_key)
 
-            # Capture-time precedence (Stage 1.2).
-            #
-            # `taken_at` is only trustworthy when the filter engine derived it
-            # from the image itself. Its `mtime` / `current_time` fallbacks read
-            # the thumbnail's filesystem timestamp, which we control and which
-            # would otherwise be meaningless. So:
-            #   1. real EXIF (or a date parsed from the filename)
-            #   2. client-reported lastModified of the original file
-            #   3. taken_at from mtime — correct now, because step 3 of this
-            #      handler stamped it with the client timestamp
-            #   4. unknown (0) -> chaptering degrades to upload order
+            # Capture-time precedence (Stage 1.2 + Stage 2.1 client EXIF).
             TRUSTED_DATE_SOURCES = ("exif_datetime", "filename_regex")
             if item.get("date_source") in TRUSTED_DATE_SOURCES and item.get("taken_at"):
                 timestamp_epoch = float(item["taken_at"])
+                exif_time_hits += 1
+            elif meta.get("timestamp_source") == "exif" and meta.get("timestamp_epoch"):
+                timestamp_epoch = float(meta["timestamp_epoch"])
                 exif_time_hits += 1
             else:
                 timestamp_epoch = (
@@ -560,12 +563,10 @@ async def ingest_photobook_dual_payload(
                 height=int(meta.get("original_height") or item.get("height") or 900),
                 aspect_ratio=float(item.get("aspect_ratio") or meta.get("aspect_ratio") or 1.33),
 
-                # ----- Stage 1.2: carry the filter engine's output forward -----
-                # Without these, cluster_photos_2tier_engine, partition_macro_chapters
-                # and cover selection all run on null inputs.
+                # ----- Stage 1.2 & 2.1: carry filter engine + client EXIF/GPS forward -----
                 timestamp_epoch=timestamp_epoch,
-                latitude=item.get("latitude"),
-                longitude=item.get("longitude"),
+                latitude=item.get("latitude") if item.get("latitude") is not None else meta.get("latitude"),
+                longitude=item.get("longitude") if item.get("longitude") is not None else meta.get("longitude"),
                 hero_score=float(item.get("hero_score") or 0.0),
                 layout_role=item.get("layout_role") or "STANDARD_FRAME",
                 is_event_cover_hero=bool(item.get("is_event_cover_hero", False)),
@@ -1536,6 +1537,34 @@ def confirm_original_upload(req: ConfirmRequest):
     }
 
 
+def _build_themes_preview(
+    ai_batch: Dict[str, Any],
+    custom_title: Optional[str] = None,
+    subtitle: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Stage 2.3 Task 4: Build early skeleton cover descriptors once AI themes are known."""
+    variations_data = (ai_batch or {}).get("variations", [])
+    default_themes = ["Warm", "Elegant", "Minimal"]
+    themes_out: List[Dict[str, Any]] = []
+    for idx in range(3):
+        var_info = variations_data[idx] if idx < len(variations_data) else {}
+        theme_name = var_info.get("theme_name", default_themes[idx])
+        pal = THEME_PALETTES.get(theme_name, THEME_PALETTES["Warm"])
+        style_spec = COVER_STYLES[idx % len(COVER_STYLES)]
+        themes_out.append({
+            "id": f"var_{idx + 1}",
+            "variation_title": var_info.get("variation_title", f"{theme_name} Style {idx + 1}"),
+            "theme_name": theme_name,
+            "base_color": pal["background"],
+            "accent_color": pal["accent"],
+            "text_color": pal["text"],
+            "cover_title": (custom_title.upper() if custom_title else var_info.get("cover_title")) or "YOUR PHOTOBOOK",
+            "cover_subtitle": subtitle or var_info.get("cover_subtitle") or "A COLLECTION OF MEMORIES",
+            "cover_style": style_spec["name"],
+        })
+    return themes_out
+
+
 def _update_job(
     job_id: str,
     progress: int,
@@ -1543,8 +1572,11 @@ def _update_job(
     status_value: str = "processing",
     result: Optional[GenerateVariationsResponse] = None,
     session_id: Optional[str] = None,
+    phase: str = "processing",
+    detail: Optional[Dict[str, Any]] = None,
+    themes: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
-    """Mutates a cached job and persists it. Safe if the cache has evicted it."""
+    """Mutates a cached job, persists it, and publishes to the SSE ProgressBus."""
     job = get_cached_job(job_id) or SessionStore.get_job(job_id)
     if job is None:
         logger.warning(f"[JobWorker] Job {job_id} vanished; cannot record '{message}'")
@@ -1556,6 +1588,21 @@ def _update_job(
         job.result = result
     cache_job(job)
     SessionStore.save_job(job, session_id=session_id)
+
+    event_payload: Dict[str, Any] = {
+        "job_id": job_id,
+        "status": status_value,
+        "phase": phase,
+        "progress": progress,
+        "message": message,
+    }
+    if detail is not None:
+        event_payload["detail"] = detail
+    if themes is not None:
+        event_payload["themes"] = themes
+    if result is not None:
+        event_payload["result"] = result.model_dump()
+    progress_bus.publish(job_id, event_payload)
 
 
 def _load_job_photos(session_id: Optional[str], photo_ids: List[str]) -> List[PhotoMeta]:
@@ -1589,6 +1636,7 @@ async def process_async_job(
 
     Stage 1.4: the photo load, the theme engine and the layout solver all run on
     CPU_WORKER_POOL via run_in_executor.
+    Stage 2.2 & 2.3: publishes real per-phase and per-spread SSE progress + early skeleton themes.
     Stage 3.2: persists and threads custom_title, include_text, and subtitle.
     """
     job_start = time.perf_counter()
@@ -1608,7 +1656,10 @@ async def process_async_job(
     async with CONCURRENCY_SEMAPHORE:
         loop = asyncio.get_running_loop()
         try:
-            _update_job(job_id, 20, "Loading photos...", session_id=session_id)
+            _update_job(
+                job_id, 20, "Loading photos...",
+                session_id=session_id, phase="loading",
+            )
             photos = await loop.run_in_executor(
                 CPU_WORKER_POOL, _load_job_photos, session_id, photo_ids
             )
@@ -1622,11 +1673,15 @@ async def process_async_job(
                 _update_job(
                     job_id, 100,
                     "No valid photos found for this session. Please upload photos and try again.",
-                    status_value="failed", session_id=session_id,
+                    status_value="failed", session_id=session_id, phase="failed",
                 )
                 return
 
-            _update_job(job_id, 45, "Generating story themes...", session_id=session_id)
+            _update_job(
+                job_id, 45, "Choosing your three styles...",
+                session_id=session_id, phase="themes",
+                detail={"photo_count": len(photos)},
+            )
             ai_batch = await loop.run_in_executor(
                 CPU_WORKER_POOL,
                 generate_story_theme_batch,
@@ -1638,7 +1693,33 @@ async def process_async_job(
                 subtitle,
             )
 
-            _update_job(job_id, 70, "Solving optimal layouts...", session_id=session_id)
+            themes_preview = _build_themes_preview(ai_batch, custom_title, subtitle)
+            _update_job(
+                job_id, 60, "Choosing your three styles...",
+                session_id=session_id, phase="themes_ready",
+                themes=themes_preview,
+            )
+
+            _update_job(
+                job_id, 70, "Solving optimal layouts...",
+                session_id=session_id, phase="layout",
+                themes=themes_preview,
+            )
+
+            def on_spread_progress(idx: int, total: int, var_idx: int) -> None:
+                prog = min(95, int(70 + 25 * ((var_idx * total + idx) / max(1, 3 * total))))
+                progress_bus.publish_threadsafe(loop, job_id, {
+                    "job_id": job_id,
+                    "status": "processing",
+                    "phase": "layout",
+                    "progress": prog,
+                    "message": f"Designing variation {var_idx + 1} of 3 — spread {idx} of {total}",
+                    "detail": {"variation": var_idx + 1, "spread": idx, "total_spreads": total},
+                    "themes": themes_preview,
+                })
+
+            progress_cb = on_spread_progress if isinstance(CPU_WORKER_POOL, ThreadPoolExecutor) else None
+
             variations = await loop.run_in_executor(
                 CPU_WORKER_POOL,
                 generate_photobook_variations_engine,
@@ -1648,12 +1729,13 @@ async def process_async_job(
                 custom_title,
                 include_text,
                 subtitle,
+                progress_cb,
             )
 
             if not variations:
                 _update_job(
                     job_id, 100, "Layout solver produced no variations.",
-                    status_value="failed", session_id=session_id,
+                    status_value="failed", session_id=session_id, phase="failed",
                 )
                 return
 
@@ -1661,11 +1743,13 @@ async def process_async_job(
             _update_job(
                 job_id, 100, "Photobook variations generated successfully!",
                 status_value="completed",
+                phase="completed",
                 result=GenerateVariationsResponse(
                     theme_name=ai_batch.get("primary_theme", "Warm"),
                     variations=variations,
                 ),
                 session_id=session_id,
+                themes=themes_preview,
             )
 
             from app.metrics import MetricsCollector
@@ -1685,13 +1769,13 @@ async def process_async_job(
             MetricsCollector.record("Failed Job Execution", elapsed_ms, {"job_id": job_id, "error": str(e)})
             _update_job(
                 job_id, 100, f"Photobook generation encountered an error: {e}",
-                status_value="failed", session_id=session_id,
+                status_value="failed", session_id=session_id, phase="failed",
             )
 
 
 @app.post("/api/generate-async", status_code=status.HTTP_202_ACCEPTED, response_model=JobStatusResponse)
 async def generate_async(payload: GenerateVariationsRequest, background_tasks: BackgroundTasks):
-    """Async endpoint returning 202 Accepted and job_id for frontend polling."""
+    """Async endpoint returning 202 Accepted and job_id for SSE/polling."""
     job_id = f"job_{uuid.uuid4().hex[:8]}"
     logger.info(
         f"[API] Queuing async job {job_id} for prompt: '{payload.user_prompt}' "
@@ -1713,6 +1797,13 @@ async def generate_async(payload: GenerateVariationsRequest, background_tasks: B
         include_text=payload.include_text,
         subtitle=payload.subtitle,
     )
+    progress_bus.publish(job_id, {
+        "job_id": job_id,
+        "status": "processing",
+        "phase": "queued",
+        "progress": 10,
+        "message": "Job queued for processing...",
+    })
 
     background_tasks.add_task(
         process_async_job,
@@ -1727,9 +1818,50 @@ async def generate_async(payload: GenerateVariationsRequest, background_tasks: B
 
     return initial_job
 
+
+@app.get("/api/jobs/{job_id}/stream")
+async def stream_job_progress(job_id: str):
+    """Stage 2.2: Server-Sent Events (SSE) progress stream for a job."""
+    job = get_cached_job(job_id) or SessionStore.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+
+    # Ensure late subscribers connecting after _last was cleared (or before first update)
+    # receive the current snapshot immediately.
+    if job_id not in progress_bus._last:
+        seed_event: Dict[str, Any] = {
+            "job_id": job.job_id,
+            "status": job.status,
+            "phase": "completed" if job.status == "completed" else ("failed" if job.status == "failed" else "processing"),
+            "progress": job.progress,
+            "message": job.message,
+        }
+        if job.result is not None:
+            seed_event["result"] = job.result.model_dump()
+        progress_bus.publish(job_id, seed_event)
+
+    async def event_gen():
+        try:
+            async for event in progress_bus.subscribe(job_id):
+                yield f"data: {json.dumps(event)}\n\n"
+        except asyncio.CancelledError:
+            logger.debug(f"[SSE] Client disconnected from {job_id}")
+            raise
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @app.get("/api/jobs/{job_id}", response_model=JobStatusResponse)
 async def get_job_status(job_id: str):
-    """Polling route returning job processing status & result with DB fallback."""
+    """Polling fallback route returning job processing status & result with DB fallback."""
     cached = get_cached_job(job_id)
     if cached is not None:
         return cached

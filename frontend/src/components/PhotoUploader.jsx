@@ -1,13 +1,15 @@
-import React, { useState } from 'react';
-import { UploadCloud, Sparkles, CheckCircle2, Loader2, AlertCircle } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { UploadCloud, CheckCircle2, Loader2 } from 'lucide-react';
 import PixovoClientDownsampler from '../utils/client_downsampler';
+import PhotoFrame from './PhotoFrame';
+
+const MAX_PREVIEW_TILES = 60;
 
 /**
- * Phase 1 Ingestion Pipeline Component:
- * - Client-side non-blocking downsampling (512px thumbnails)
- * - Live Stepper & Progress indicator (integrated from Phase 1 specs)
- * - Builds Dual-Payload (Thumbnails + Metadata + Originals)
- * - Passes processed payload to parent for backend ingestion handshake
+ * Phase 1 & Stage 2.1/2.3 Ingestion Pipeline Component:
+ * - OffscreenCanvas Web Worker pool downsampling (512px thumbnails) + EXIF/GPS extraction
+ * - Bounded preview grid (capped at 60 tiles with +N more indicator)
+ * - Hands local preview URLs to App.jsx for optimistic instant rendering during ingest
  */
 export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
   const [dragActive, setDragActive] = useState(false);
@@ -16,18 +18,30 @@ export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
   const [processingStage, setProcessingStage] = useState(''); // 'downsampling' | 'ready' | 'error'
   const [progressStats, setProgressStats] = useState({ completed: 0, total: 0 });
 
-  const downsampler = new PixovoClientDownsampler({
-    maxDimension: 512,
-    quality: 0.85,
-    concurrency: 4
-  });
+  // Stage 2.1 Task 5: Hoist downsampler instance into a ref so worker pool is reused
+  // across renders and terminated cleanly on unmount.
+  const downsamplerRef = useRef(null);
+  if (!downsamplerRef.current) {
+    downsamplerRef.current = new PixovoClientDownsampler({
+      maxDimension: 512,
+      quality: 0.85
+    });
+  }
+
+  useEffect(() => {
+    return () => {
+      downsamplerRef.current?.terminate();
+    };
+  }, []);
 
   const handleFiles = async (files) => {
     if (!files || files.length === 0) return;
-    const fileList = Array.from(files).filter(f => f.type.startsWith('image/'));
+    const fileList = Array.from(files).filter(
+      f => f.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|tiff)$/i.test(f.name)
+    );
 
     if (fileList.length === 0) {
-      alert("Please upload valid image files (JPG, PNG, WebP).");
+      alert('Please upload valid image files (JPG, PNG, WebP).');
       return;
     }
 
@@ -37,23 +51,32 @@ export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
 
     const downsampleStartTime = performance.now();
     try {
-      // 1. Client-Side Non-blocking Batch Downsampling & EXIF extraction
+      const downsampler = downsamplerRef.current;
+
+      // 1. Worker-backed non-blocking batch downsampling & EXIF/GPS extraction
       const processedResults = await downsampler.processBatch(fileList, (completed, total) => {
         setProgressStats({ completed, total });
       });
 
       if (!processedResults || processedResults.length === 0) {
-        throw new Error("No valid photos could be processed.");
+        throw new Error('No valid photos could be processed.');
       }
 
       const totalDownsampleTimeMs = performance.now() - downsampleStartTime;
 
-      // 2. Build local preview items for instant UI feedback
+      // Revoke any previous local-only URLs if re-uploading on the same screen
+      localPhotos.forEach(p => {
+        if (p.previewUrl && p._ownedByUploader) {
+          URL.revokeObjectURL(p.previewUrl);
+        }
+      });
+
+      // 2. Build local preview items for optimistic UI feedback (Stage 2.3 Task 1)
       const previewItems = processedResults.map(p => ({
         photo_id: p.photo_id,
         filename: p.filename,
         aspect_ratio: p.aspect_ratio,
-        previewUrl: URL.createObjectURL(p.thumbnail_blob),
+        previewUrl: p.thumbnail_blob ? URL.createObjectURL(p.thumbnail_blob) : '',
         originalFile: p.original_file,
         thumbnailBlob: p.thumbnail_blob
       }));
@@ -62,11 +85,7 @@ export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
       setProcessingStage('ready');
       setIsProcessing(false);
 
-      // 3. Hand the processed photos to App.jsx, which opens a session and
-      //    uploads them in chunks. The payload is no longer built here: a
-      //    single FormData containing every original was a ~8GB request at
-      //    1,000 photos. App.jsx now calls downsampler.buildChunkPayload()
-      //    once per chunk.
+      // 3. Hand processed photos + optimistic preview items to App.jsx
       onPhotosUploaded({
         processedCount: processedResults.length,
         processedPhotos: processedResults,
@@ -74,9 +93,8 @@ export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
         downsampler: downsampler,
         downsampleTimeMs: totalDownsampleTimeMs
       });
-
     } catch (err) {
-      console.error("[PhotoUploader] Downsampling error:", err);
+      console.error('[PhotoUploader] Downsampling error:', err);
       setProcessingStage('error');
       setIsProcessing(false);
       alert(`Photo processing failed: ${err.message}`);
@@ -86,9 +104,9 @@ export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
   const handleDrag = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
+    if (e.type === 'dragenter' || e.type === 'dragover') {
       setDragActive(true);
-    } else if (e.type === "dragleave") {
+    } else if (e.type === 'dragleave') {
       setDragActive(false);
     }
   };
@@ -109,11 +127,14 @@ export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
     }
   };
 
+  const visiblePhotos = localPhotos.slice(0, MAX_PREVIEW_TILES);
+  const overflowCount = Math.max(0, localPhotos.length - MAX_PREVIEW_TILES);
+
   return (
     <div className="step-card">
       <div className="step-header">
         <h2>Step 1: Upload Your Photos</h2>
-        <p>Select or drag & drop 20 to 200 photos (Phase 1 Dual-Payload Client Ingestion)</p>
+        <p>Select or drag & drop up to 1,000 photos (Worker-Accelerated 512px Client Ingestion)</p>
       </div>
 
       {/* Live Ingestion Stepper Status */}
@@ -131,7 +152,7 @@ export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <Loader2 size={20} color="var(--px-brand-iris)" className="animate-spin" />
             <span style={{ fontWeight: 600, color: 'var(--px-brand-iris-active)', fontSize: '0.92rem' }}>
-              Downsampling 512px thumbnails ({progressStats.completed} / {progressStats.total})...
+              Downsampling 512px thumbnails — {progressStats.completed} of {progressStats.total}
             </span>
           </div>
           <span style={{ fontSize: '0.8rem', color: 'var(--px-text-muted)', fontWeight: 500 }}>
@@ -158,7 +179,7 @@ export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
         </div>
       )}
 
-      <div 
+      <div
         className={`dropzone ${dragActive ? 'active' : ''}`}
         onDragEnter={handleDrag}
         onDragOver={handleDrag}
@@ -170,25 +191,25 @@ export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
           Drag & drop photos here, or <span style={{ color: 'var(--px-brand-iris)', textDecoration: 'underline' }}>browse</span>
         </h4>
         <p style={{ color: 'var(--px-text-muted)', fontSize: '0.85rem' }}>
-          {isProcessing ? "Processing 512px canvas downsampling..." : "Supports JPEG, PNG, WebP (20 to 200 photos)"}
+          {isProcessing ? 'Processing 512px worker downsampling...' : 'Supports JPEG, PNG, WebP (20 to 1,000 photos)'}
         </p>
-        
-        <input 
-          type="file" 
-          multiple 
+
+        <input
+          type="file"
+          multiple
           accept="image/*"
           onChange={handleChange}
           style={{ display: 'none' }}
           id="file-upload-input"
           disabled={isProcessing || isUploading}
         />
-        
-        <label 
-          htmlFor="file-upload-input" 
+
+        <label
+          htmlFor="file-upload-input"
           className="btn btn-secondary"
           style={{ marginTop: '1.25rem', display: 'inline-flex', cursor: isProcessing ? 'not-allowed' : 'pointer' }}
         >
-          {isProcessing ? "Downsampling..." : "Select Photos"}
+          {isProcessing ? 'Downsampling...' : 'Select Photos'}
         </label>
       </div>
 
@@ -210,21 +231,35 @@ export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
             borderRadius: '12px',
             border: '1px solid var(--px-border-light)'
           }}>
-            {localPhotos.map((p, idx) => (
-              <div key={idx} className="photo-card" style={{
-                position: 'relative',
-                borderRadius: '8px',
-                overflow: 'hidden',
-                aspectRatio: '1',
-                background: 'var(--px-border-subtle)'
-              }}>
-                <img 
-                  src={p.previewUrl} 
-                  alt={p.filename} 
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                />
-              </div>
+            {visiblePhotos.map((p) => (
+              <PhotoFrame
+                key={p.photo_id}
+                src={p.previewUrl}
+                aspectRatio={1}
+                alt={p.filename}
+                className="photo-card"
+                style={{ borderRadius: '8px' }}
+              />
             ))}
+            {overflowCount > 0 && (
+              <div
+                className="photo-card"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  aspectRatio: '1',
+                  borderRadius: '8px',
+                  background: 'var(--px-brand-iris-subtle)',
+                  border: '1px solid var(--px-brand-iris-border)',
+                  color: 'var(--px-brand-iris-active)',
+                  fontWeight: 700,
+                  fontSize: '0.9rem'
+                }}
+              >
+                +{overflowCount} more
+              </div>
+            )}
           </div>
         </div>
       )}

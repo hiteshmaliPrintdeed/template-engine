@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Sparkles, Check, Clock, RefreshCw } from 'lucide-react';
 import ToolbarHeader from './components/ToolbarHeader';
 import PhotoUploader from './components/PhotoUploader';
 import AIChatbotWidget from './components/AIChatbotWidget';
 import BookCarousel3D from './components/BookCarousel3D';
 import SpreadViewer from './components/SpreadViewer';
+import PhotoFrame from './components/PhotoFrame';
 import PixovoClientDownsampler from './utils/client_downsampler';
+import useJobProgress from './hooks/useJobProgress';
 import { saveOriginalBlob, getPendingBlobs, removeOriginalBlob, sweepStaleBlobs, clearAllBlobs } from './utils/indexedDB';
 import { uploadOriginal, resetTransport, Outcome } from './utils/uploadTransport';
 import './styles/storymode.css';
@@ -44,9 +46,13 @@ const MICRO_FACTS = [
   'Hero cover selector guarantees non-overlapping cover photography across all 3 editions.'
 ];
 
+const MAX_CURATION_STRIP_TILES = 48;
+
 export default function App() {
   const [step, setStep] = useState('upload'); // 'upload' -> 'chat' -> 'generating' -> 'preview'
   const [uploadedPhotos, setUploadedPhotos] = useState([]);
+  const [localPreviews, setLocalPreviews] = useState([]); // [{ photo_id, filename, previewUrl, aspect_ratio }]
+  const [serverPhotos, setServerPhotos] = useState({});   // photo_id -> PhotoMeta | { rejected, reject_reason }
   const [isPhotoUploadComplete, setIsPhotoUploadComplete] = useState(false);
   const [uploadedCount, setUploadedCount] = useState(0);
   const [userPrompt, setUserPrompt] = useState('');
@@ -61,6 +67,7 @@ export default function App() {
   const [jobProgress, setJobProgress] = useState(0);
   const [jobStatus, setJobStatus] = useState('idle');
   const [jobMessage, setJobMessage] = useState('');
+  const [skeletonThemes, setSkeletonThemes] = useState(null);
   const [displayProgress, setDisplayProgress] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [factIndex, setFactIndex] = useState(0);
@@ -70,27 +77,27 @@ export default function App() {
   const [isExportingPDF, setIsExportingPDF] = useState(false);
   const [syncStatus, setSyncStatus] = useState({ synced: 0, total: 0 });
 
-  // Stage 1.1: one stable session token for the whole upload, persisted so a
-  // mid-upload refresh does not orphan the HD originals queued in IndexedDB.
+  // Stage 1.1: one stable session token for the whole upload
   const [sessionId, setSessionId] = useState(() => {
     try {
       return sessionStorage.getItem('pixovo_session_id');
     } catch (_) {
-      return null; // private browsing / storage disabled
+      return null;
     }
   });
-  const [ingestProgress, setIngestProgress] = useState({ done: 0, total: 0, survived: 0 });
+  const [ingestProgress, setIngestProgress] = useState({
+    done: 0,
+    total: 0,
+    received: 0,
+    survived: 0
+  });
 
   const spreadsRef = useRef(null);
   const uploadedPhotosRef = useRef([]);
+  const localPreviewsRef = useRef([]);
   const sessionIdRef = useRef(sessionId);
-  // Survivors' original files still awaiting HD upload, so a completed job can
-  // re-prioritise them by actual placement in the chosen variation.
   const originalsQueueRef = useRef({});
   const syncedIdsRef = useRef(new Set());
-  // Held so a session reset can stop an in-flight job poll; otherwise it keeps
-  // ticking and pushes the user back to 'preview' after the reset.
-  const pollIntervalRef = useRef(null);
 
   const persistSessionId = (id) => {
     sessionIdRef.current = id;
@@ -98,142 +105,55 @@ export default function App() {
     try {
       if (id) sessionStorage.setItem('pixovo_session_id', id);
       else sessionStorage.removeItem('pixovo_session_id');
-    } catch (_) {
-      /* non-fatal: upload still works, refresh-resume does not */
-    }
+    } catch (_) {}
   };
 
-  // Smooth stage-bounded visual progress interpolation + live elapsed timer + micro-facts ticker
-  useEffect(() => {
-    if (step !== 'generating') {
-      setElapsedSeconds(0);
-      return;
-    }
-
-    const startTs = performance.now();
-    const timerInterval = setInterval(() => {
-      setElapsedSeconds(((performance.now() - startTs) / 1000).toFixed(1));
-    }, 100);
-
-    const factInterval = setInterval(() => {
-      setFactIndex((prev) => (prev + 1) % MICRO_FACTS.length);
-    }, 2800);
-
-    return () => {
-      clearInterval(timerInterval);
-      clearInterval(factInterval);
-    };
-  }, [step]);
-
-  // Interpolate displayProgress smoothly (min 250ms per visual tick) within the
-  // current stage's range without ever crossing the stage's upper checkpoint
-  // until real jobProgress has reached it.
-  useEffect(() => {
-    if (step !== 'generating') return;
-
-    const getCeilingForRealProgress = (realProg, status) => {
-      if (status === 'completed' && realProg >= 100) return 100;
-      if (realProg < 20) return 19;
-      if (realProg < 45) return 44;
-      if (realProg < 70) return 69;
-      return 98;
-    };
-
-    const tick = setInterval(() => {
-      setDisplayProgress((prev) => {
-        const ceiling = getCeilingForRealProgress(jobProgress, jobStatus);
-        if (prev < jobProgress) {
-          return Math.min(ceiling, Math.max(jobProgress, prev + 4));
-        }
-        if (prev < ceiling) {
-          return prev + 1;
-        }
-        return prev;
+  // Stage 2.3 Task 1: Reconcile optimistic local blob URLs with server PhotoMeta
+  const reconciledPhotos = useMemo(() => {
+    if (localPreviews.length > 0) {
+      return localPreviews.map((lp) => {
+        const server = serverPhotos[lp.photo_id];
+        return {
+          ...lp,
+          url: server?.url || lp.previewUrl,
+          status: server ? (server.rejected ? 'rejected' : 'kept') : 'pending',
+          reject_reason: server?.reject_reason || null,
+          dominant_colors: server?.dominant_colors || null,
+        };
       });
-    }, 260);
-
-    return () => clearInterval(tick);
-  }, [step, jobProgress, jobStatus]);
-
-  // Rehydrate a session that survived a page refresh, so the IndexedDB
-  // auto-resume below has a session to resume *into*.
-  useEffect(() => {
-    const stored = sessionIdRef.current;
-    if (!stored) return;
-
-    (async () => {
-      try {
-        const res = await fetch(`/api/sessions/${stored}`);
-        if (res.status === 404 || res.status === 410) {
-          console.log(`[Session] Stored session ${stored} is gone; starting clean.`);
-          persistSessionId(null);
-          return;
-        }
-        if (!res.ok) return;
-
-        const data = await res.json();
-        const photos = data.photos || [];
-        if (photos.length > 0) {
-          uploadedPhotosRef.current = photos;
-          setUploadedPhotos(photos);
-          setUploadedCount(data.received_photo_count || photos.length);
-          setIsPhotoUploadComplete(data.status === 'ready');
-          setStep('chat');
-          console.log(
-            `[Session] Resumed ${stored}: ${photos.length} photos already ingested (status ${data.status}).`
-          );
-        }
-      } catch (err) {
-        console.warn('[Session] Could not rehydrate stored session:', err);
-      }
-    })();
-  }, []);
-
-  // Auto-Resume Unsynced HD Blobs from IndexedDB on startup / reconnect
-  useEffect(() => {
-    async function resumePendingSync() {
-      await sweepStaleBlobs();
-      const pending = await getPendingBlobs();
-      if (!pending || pending.length === 0) return;
-
-      console.log(`[IndexedDB Auto-Resume] Found ${pending.length} unsynced HD blobs. Resuming background upload...`);
-      setSyncStatus({ synced: 0, total: pending.length });
-      let count = 0;
-
-      for (const item of pending) {
-        const itemSession = item.sessionId || sessionIdRef.current;
-        if (!itemSession) {
-          console.warn(`[IndexedDB Auto-Resume] No session for ${item.photoId}; discarding orphaned blob.`);
-          await removeOriginalBlob(item.photoId);
-          continue;
-        }
-
-        try {
-          const outcome = await uploadOriginal({
-            sessionId: itemSession,
-            photoId: item.photoId,
-            file: item.blob,
-            confirmFirst: true,
-          });
-
-          if (outcome === Outcome.DONE) {
-            await removeOriginalBlob(item.photoId);
-            count++;
-            setSyncStatus({ synced: count, total: pending.length });
-          } else if (outcome === Outcome.PERMANENT) {
-            console.warn(`[IndexedDB Auto-Resume] Discarding ${item.photoId}; server will never accept it.`);
-            await removeOriginalBlob(item.photoId);
-          }
-        } catch (err) {
-          console.warn(`[IndexedDB Auto-Resume] Network offline, will retry later for ${item.photoId}:`, err);
-        }
-      }
     }
+    return uploadedPhotos.map((sp) => ({
+      photo_id: sp.id,
+      filename: sp.filename,
+      aspect_ratio: sp.aspect_ratio || 1,
+      url: sp.url || sp.preview_url,
+      status: 'kept',
+      reject_reason: null,
+      dominant_colors: sp.dominant_colors || null,
+    }));
+  }, [localPreviews, serverPhotos, uploadedPhotos]);
 
-    resumePendingSync();
-    window.addEventListener('online', resumePendingSync);
-    return () => window.removeEventListener('online', resumePendingSync);
-  }, []);
+  // Stage 2.3 Task 1: Free each local blob URL only once its server URL is in use
+  useEffect(() => {
+    const knownIds = Object.keys(serverPhotos);
+    if (knownIds.length === 0 || localPreviewsRef.current.length === 0) return;
+
+    let changed = false;
+    const nextPreviews = localPreviewsRef.current.map((lp) => {
+      const server = serverPhotos[lp.photo_id];
+      if (server?.url && lp.previewUrl) {
+        URL.revokeObjectURL(lp.previewUrl);
+        changed = true;
+        return { ...lp, previewUrl: null };
+      }
+      return lp;
+    });
+
+    if (changed) {
+      localPreviewsRef.current = nextPreviews;
+      setLocalPreviews(nextPreviews);
+    }
+  }, [serverPhotos]);
 
   const collectPlacedPhotoIds = (variation) => {
     if (!variation || !variation.spreads) return new Set();
@@ -254,7 +174,7 @@ export default function App() {
     if (!sid || !queue || Object.keys(queue).length === 0) return;
 
     const placed = collectPlacedPhotoIds(variation);
-    const pending = Object.keys(queue).filter(pid => !syncedIdsRef.current.has(pid));
+    const pending = Object.keys(queue).filter((pid) => !syncedIdsRef.current.has(pid));
     if (pending.length === 0) return;
 
     const ordered = pending.sort((a, b) => {
@@ -265,23 +185,198 @@ export default function App() {
 
     const reordered = {};
     for (const pid of ordered) reordered[pid] = queue[pid];
-    console.log(
-      `[Background Sync] Re-prioritised ${ordered.length} pending originals; ` +
-      `${ordered.filter(p => placed.has(p)).length} are placed in the chosen variation.`
-    );
     streamOriginalsInBackground(reordered, sid);
   };
 
+  // Stage 2.2 Task 4: Subscribe to real-time SSE job progress via useJobProgress hook
+  const sseState = useJobProgress(currentJobId, {
+    onComplete: (job) => {
+      setDisplayProgress(100);
+      setJobProgress(100);
+      setJobStatus('completed');
+      const vars = job?.result?.variations || [];
+      setVariations(vars);
+      setActiveVarIdx(0);
+      setIsLoading(false);
+      setStep('preview');
+      if (vars.length > 0) prioritiseOriginalsForVariation(vars[0]);
+    },
+    onError: (job) => {
+      alert(`Generation failed: ${job?.message || 'Unknown error'}`);
+      setIsLoading(false);
+      setJobStatus('failed');
+      setStep('chat');
+    },
+  });
+
+  useEffect(() => {
+    if (!currentJobId) return;
+    if (sseState.progress) setJobProgress(sseState.progress);
+    if (sseState.status) setJobStatus(sseState.status);
+    if (sseState.message) setJobMessage(sseState.message);
+    if (sseState.themes) setSkeletonThemes(sseState.themes);
+  }, [currentJobId, sseState]);
+
+  // Elapsed timer + micro-facts ticker using setTimeout chains (zero leaked intervals)
+  useEffect(() => {
+    if (step !== 'generating') {
+      setElapsedSeconds(0);
+      return undefined;
+    }
+
+    let active = true;
+    const startTs = performance.now();
+    let timerId = null;
+    let factId = null;
+
+    const tickTimer = () => {
+      if (!active) return;
+      setElapsedSeconds(((performance.now() - startTs) / 1000).toFixed(1));
+      timerId = setTimeout(tickTimer, 100);
+    };
+
+    const tickFact = () => {
+      if (!active) return;
+      setFactIndex((prev) => (prev + 1) % MICRO_FACTS.length);
+      factId = setTimeout(tickFact, 2800);
+    };
+
+    timerId = setTimeout(tickTimer, 100);
+    factId = setTimeout(tickFact, 2800);
+
+    return () => {
+      active = false;
+      if (timerId) clearTimeout(timerId);
+      if (factId) clearTimeout(factId);
+    };
+  }, [step]);
+
+  // Smoothly interpolate displayProgress within the current checkpoint range
+  useEffect(() => {
+    if (step !== 'generating') return undefined;
+
+    let active = true;
+    let tickId = null;
+
+    const getCeilingForRealProgress = (realProg, status) => {
+      if (status === 'completed' && realProg >= 100) return 100;
+      if (realProg < 20) return 19;
+      if (realProg < 45) return 44;
+      if (realProg < 70) return 69;
+      return 98;
+    };
+
+    const stepDisplay = () => {
+      if (!active) return;
+      setDisplayProgress((prev) => {
+        const ceiling = getCeilingForRealProgress(jobProgress, jobStatus);
+        if (prev < jobProgress) {
+          return Math.min(ceiling, Math.max(jobProgress, prev + 4));
+        }
+        if (prev < ceiling) {
+          return prev + 1;
+        }
+        return prev;
+      });
+      tickId = setTimeout(stepDisplay, 260);
+    };
+
+    tickId = setTimeout(stepDisplay, 260);
+    return () => {
+      active = false;
+      if (tickId) clearTimeout(tickId);
+    };
+  }, [step, jobProgress, jobStatus]);
+
+  // Rehydrate a session that survived a page refresh
+  useEffect(() => {
+    const stored = sessionIdRef.current;
+    if (!stored) return;
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/sessions/${stored}`);
+        if (res.status === 404 || res.status === 410) {
+          persistSessionId(null);
+          return;
+        }
+        if (!res.ok) return;
+
+        const data = await res.json();
+        const photos = data.photos || [];
+        if (photos.length > 0) {
+          uploadedPhotosRef.current = photos;
+          setUploadedPhotos(photos);
+          const photoMap = {};
+          photos.forEach((p) => {
+            photoMap[p.id] = p;
+          });
+          setServerPhotos(photoMap);
+          setUploadedCount(data.received_photo_count || photos.length);
+          setIngestProgress({
+            done: 1,
+            total: 1,
+            received: data.received_photo_count || photos.length,
+            survived: data.survived_photo_count || photos.length
+          });
+          setIsPhotoUploadComplete(data.status === 'ready');
+          setStep('chat');
+        }
+      } catch (err) {
+        console.warn('[Session] Could not rehydrate stored session:', err);
+      }
+    })();
+  }, []);
+
+  // Auto-Resume Unsynced HD Blobs from IndexedDB on startup / reconnect
+  useEffect(() => {
+    async function resumePendingSync() {
+      await sweepStaleBlobs();
+      const pending = await getPendingBlobs();
+      if (!pending || pending.length === 0) return;
+
+      setSyncStatus({ synced: 0, total: pending.length });
+      let count = 0;
+
+      for (const item of pending) {
+        const itemSession = item.sessionId || sessionIdRef.current;
+        if (!itemSession) {
+          await removeOriginalBlob(item.photoId);
+          continue;
+        }
+
+        try {
+          const outcome = await uploadOriginal({
+            sessionId: itemSession,
+            photoId: item.photoId,
+            file: item.blob,
+            confirmFirst: true,
+          });
+
+          if (outcome === Outcome.DONE) {
+            await removeOriginalBlob(item.photoId);
+            count++;
+            setSyncStatus({ synced: count, total: pending.length });
+          } else if (outcome === Outcome.PERMANENT) {
+            await removeOriginalBlob(item.photoId);
+          }
+        } catch (err) {
+          console.warn(`[IndexedDB Auto-Resume] Retry later for ${item.photoId}:`, err);
+        }
+      }
+    }
+
+    resumePendingSync();
+    window.addEventListener('online', resumePendingSync);
+    return () => window.removeEventListener('online', resumePendingSync);
+  }, []);
+
   const streamOriginalsInBackground = async (originalFilesMap, uploadSessionId) => {
     const photoIds = Object.keys(originalFilesMap).filter(
-      pid => !syncedIdsRef.current.has(pid)
+      (pid) => !syncedIdsRef.current.has(pid)
     );
     const total = photoIds.length;
-    if (total === 0) return;
-    if (!uploadSessionId) {
-      console.warn('[Background Sync] No session id; skipping original upload.');
-      return;
-    }
+    if (total === 0 || !uploadSessionId) return;
 
     setSyncStatus({ synced: 0, total });
     let syncedCount = 0;
@@ -289,33 +384,34 @@ export default function App() {
     const concurrency = 3;
     for (let i = 0; i < photoIds.length; i += concurrency) {
       const chunk = photoIds.slice(i, i + concurrency);
-      await Promise.all(chunk.map(async (photoId) => {
-        const file = originalFilesMap[photoId];
-        if (!file) return;
+      await Promise.all(
+        chunk.map(async (photoId) => {
+          const file = originalFilesMap[photoId];
+          if (!file) return;
 
-        await saveOriginalBlob(photoId, file, uploadSessionId);
+          await saveOriginalBlob(photoId, file, uploadSessionId);
 
-        try {
-          const outcome = await uploadOriginal({
-            sessionId: uploadSessionId,
-            photoId,
-            file,
-          });
+          try {
+            const outcome = await uploadOriginal({
+              sessionId: uploadSessionId,
+              photoId,
+              file,
+            });
 
-          if (outcome === Outcome.DONE) {
-            await removeOriginalBlob(photoId);
-            syncedIdsRef.current.add(photoId);
-            syncedCount++;
-            setSyncStatus({ synced: syncedCount, total });
-          } else if (outcome === Outcome.PERMANENT) {
-            console.warn(`[Background Sync] Discarding ${photoId}; server will never accept it.`);
-            await removeOriginalBlob(photoId);
-            syncedIdsRef.current.add(photoId);
+            if (outcome === Outcome.DONE) {
+              await removeOriginalBlob(photoId);
+              syncedIdsRef.current.add(photoId);
+              syncedCount++;
+              setSyncStatus({ synced: syncedCount, total });
+            } else if (outcome === Outcome.PERMANENT) {
+              await removeOriginalBlob(photoId);
+              syncedIdsRef.current.add(photoId);
+            }
+          } catch (err) {
+            console.warn(`[Background Sync] Will retry later for ${photoId}:`, err);
           }
-        } catch (err) {
-          console.warn(`[Background Sync] Will retry later for ${photoId}:`, err);
-        }
-      }));
+        })
+      );
     }
   };
 
@@ -335,16 +431,29 @@ export default function App() {
     } catch (err) {
       if (err.permanent || attempt >= MAX_RETRIES) throw err;
       const backoffMs = 2 ** attempt * 1000;
-      console.warn(`[Ingest] Chunk failed (${err.message}); retrying in ${backoffMs}ms`);
-      await new Promise(r => setTimeout(r, backoffMs));
+      await new Promise((r) => setTimeout(r, backoffMs));
       return uploadChunkWithRetry(payload, attempt + 1);
     }
   };
 
+  const normalizeRejectReason = (item) => {
+    const raw = (item?.reject_reason || item?.reason || item?.status || 'rejected').toLowerCase();
+    if (raw.includes('blur')) return 'blurry';
+    if (raw.includes('dup')) return 'duplicate';
+    if (raw.includes('exposure') || raw.includes('dark') || raw.includes('bright') || raw.includes('contrast')) return 'exposure';
+    if (raw.includes('qr') || raw.includes('doc') || raw.includes('screen') || raw.includes('text')) return 'junk';
+    return 'filtered';
+  };
+
   const handlePhotosUploaded = async (uploadPackage) => {
-    const { processedCount, processedPhotos, downsampler, downsampleTimeMs } = uploadPackage;
+    const { processedCount, processedPhotos, previewItems = [], downsampler, downsampleTimeMs } = uploadPackage;
     setUploadedCount(processedCount);
     setIsPhotoUploadComplete(false);
+
+    // Stage 2.3 Task 1 & 2: Render immediately from optimistic local blobs
+    localPreviewsRef.current = previewItems;
+    setLocalPreviews(previewItems);
+    setServerPhotos({});
     setStep('chat');
 
     if (downsampleTimeMs) {
@@ -363,7 +472,7 @@ export default function App() {
 
     const origMap = {};
     if (processedPhotos) {
-      processedPhotos.forEach(p => {
+      processedPhotos.forEach((p) => {
         if (p.photo_id && p.original_file) {
           origMap[p.photo_id] = p.original_file;
         }
@@ -386,37 +495,53 @@ export default function App() {
       persistSessionId(session_id);
 
       const chunks = PixovoClientDownsampler.chunk(processedPhotos, chunk_size || 40);
-      setIngestProgress({ done: 0, total: chunks.length, survived: 0 });
+      setIngestProgress({ done: 0, total: chunks.length, received: 0, survived: 0 });
 
       const allPhotos = [];
       for (let i = 0; i < chunks.length; i++) {
         const payload = downsampler.buildChunkPayload(chunks[i], session_id, i, chunks.length);
         const data = await uploadChunkWithRetry(payload);
 
-        allPhotos.push(...(data.photos || []));
+        const chunkSurvived = data.photos || [];
+        const chunkRejected = data.rejected_photos || [];
+
+        allPhotos.push(...chunkSurvived);
         uploadedPhotosRef.current = allPhotos.slice();
         setUploadedPhotos(allPhotos.slice());
+
+        // Reconcile per-photo kept & rejected states for the live curation strip
+        setServerPhotos((prev) => {
+          const next = { ...prev };
+          chunkSurvived.forEach((p) => {
+            next[p.id] = { ...p, rejected: false };
+          });
+          chunkRejected.forEach((r) => {
+            const rid = r.photo_id || (r.filename ? r.filename.replace(/_thumb\.\w+$/, '') : null);
+            if (rid) {
+              next[rid] = {
+                id: rid,
+                rejected: true,
+                reject_reason: normalizeRejectReason(r),
+              };
+            }
+          });
+          return next;
+        });
+
         setIngestProgress({
           done: i + 1,
           total: chunks.length,
+          received: data.session_received ?? Math.min(processedCount, (i + 1) * (chunk_size || 40)),
           survived: data.session_survived ?? allPhotos.length
         });
       }
 
       setIsPhotoUploadComplete(true);
-      console.log(
-        `[Phase 1 Ingestion] Session ${session_id}: ${allPhotos.length} photos survived ` +
-        `across ${chunks.length} chunks.`
-      );
 
-      const survivorIds = new Set(allPhotos.map(p => p.id));
+      const survivorIds = new Set(allPhotos.map((p) => p.id));
       const survivorOrigMap = {};
       for (const [pid, file] of Object.entries(origMap)) {
         if (survivorIds.has(pid)) survivorOrigMap[pid] = file;
-      }
-      const skipped = Object.keys(origMap).length - Object.keys(survivorOrigMap).length;
-      if (skipped > 0) {
-        console.log(`[Background Sync] Skipping ${skipped} rejected photos' originals.`);
       }
       originalsQueueRef.current = survivorOrigMap;
       streamOriginalsInBackground(survivorOrigMap, session_id);
@@ -436,7 +561,7 @@ export default function App() {
           photosToUse = uploadedPhotosRef.current;
           break;
         }
-        await new Promise(r => setTimeout(r, 200));
+        await new Promise((r) => setTimeout(r, 200));
       }
     }
 
@@ -453,11 +578,11 @@ export default function App() {
     setJobStatus('processing');
     setJobProgress(10);
     setDisplayProgress(8);
+    setSkeletonThemes(null);
     setJobMessage('Submitting async photobook job...');
 
     try {
-      const photoIds = photosToUse.map(p => p.id);
-      console.log(`[Generate Async] Submitting ${photoIds.length} photo IDs for prompt: '${promptToUse}'`);
+      const photoIds = photosToUse.map((p) => p.id);
       const res = await fetch('/api/generate-async', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -474,7 +599,6 @@ export default function App() {
       if (res.status === 202) {
         const job = await res.json();
         setCurrentJobId(job.job_id);
-        pollJobStatus(job.job_id);
       } else {
         alert('Failed to submit job');
         setIsLoading(false);
@@ -489,42 +613,8 @@ export default function App() {
     }
   };
 
-  const pollJobStatus = (jobId) => {
-    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/jobs/${jobId}`);
-        if (res.ok) {
-          const job = await res.json();
-          setJobProgress(job.progress || 0);
-          setJobStatus(job.status || 'processing');
-          setJobMessage(job.message || 'Processing...');
-
-          if (job.status === 'completed' && job.result) {
-            clearInterval(interval);
-            setDisplayProgress(100);
-            const vars = job.result.variations || [];
-            setVariations(vars);
-            setActiveVarIdx(0);
-            setIsLoading(false);
-            setStep('preview');
-            if (vars.length > 0) prioritiseOriginalsForVariation(vars[0]);
-          } else if (job.status === 'failed') {
-            clearInterval(interval);
-            alert(`Generation failed: ${job.message}`);
-            setIsLoading(false);
-            setStep('chat');
-          }
-        }
-      } catch (err) {
-        console.error('Polling error:', err);
-      }
-    }, 500);
-    pollIntervalRef.current = interval;
-  };
-
   const handleSpreadUpdate = (spreadIdx, newSpread) => {
-    setVariations(prevVars => {
+    setVariations((prevVars) => {
       const updated = [...prevVars];
       const activeVar = { ...updated[activeVarIdx] };
       const updatedSpreads = [...activeVar.spreads];
@@ -631,10 +721,11 @@ export default function App() {
       return;
     }
 
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-      pollIntervalRef.current = null;
-    }
+    // Revoke any remaining local preview URLs
+    localPreviewsRef.current.forEach((lp) => {
+      if (lp.previewUrl) URL.revokeObjectURL(lp.previewUrl);
+    });
+    localPreviewsRef.current = [];
 
     persistSessionId(null);
     await clearAllBlobs();
@@ -645,11 +736,14 @@ export default function App() {
     syncedIdsRef.current = new Set();
 
     setUploadedPhotos([]);
+    setLocalPreviews([]);
+    setServerPhotos({});
     setUploadedCount(0);
     setIsPhotoUploadComplete(false);
-    setIngestProgress({ done: 0, total: 0, survived: 0 });
+    setIngestProgress({ done: 0, total: 0, received: 0, survived: 0 });
     setSyncStatus({ synced: 0, total: 0 });
     setVariations([]);
+    setSkeletonThemes(null);
     setActiveVarIdx(0);
     setVariationSeedOffset(1);
     setCurrentJobId(null);
@@ -663,8 +757,6 @@ export default function App() {
     setIsExportingPDF(false);
     setIsReshufflingVars(false);
     setStep('upload');
-
-    console.log('[Session] Cleared; ready for a new upload.');
   };
 
   const scrollToSpreads = () => {
@@ -673,7 +765,6 @@ export default function App() {
     }
   };
 
-  // Determine each synthesis stage's state strictly from real jobProgress / jobStatus
   const getSynthesisStageState = (stage) => {
     if (stage.id === 4) {
       if (jobStatus === 'completed' && jobProgress >= 100) return 'complete';
@@ -684,6 +775,9 @@ export default function App() {
     if (jobProgress >= stage.minProgress) return 'active';
     return 'pending';
   };
+
+  const visibleCurationTiles = reconciledPhotos.slice(0, MAX_CURATION_STRIP_TILES);
+  const curationOverflow = Math.max(0, reconciledPhotos.length - MAX_CURATION_STRIP_TILES);
 
   return (
     <div className="app-container">
@@ -697,96 +791,168 @@ export default function App() {
 
       <main className="main-wrapper">
         {step === 'generating' && (
-          <div className="step-card synthesis-loader-card">
-            <div className="synthesis-top-row">
-              <div className="synthesis-orb-wrapper">
-                <div className="synthesis-pulse-ring" />
-                <div className="synthesis-rotate-ring" />
-                <div className="synthesis-orb-core">
-                  <Sparkles size={20} strokeWidth={1.75} color="var(--px-brand-iris)" />
+          <div key="step-generating" className="step-enter-active" style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2rem' }}>
+            <div className="step-card synthesis-loader-card">
+              <div className="synthesis-top-row">
+                <div className="synthesis-orb-wrapper">
+                  <div className="synthesis-pulse-ring" />
+                  <div className="synthesis-rotate-ring" />
+                  <div className="synthesis-orb-core">
+                    <Sparkles size={20} strokeWidth={1.75} color="var(--px-brand-iris)" />
+                  </div>
+                </div>
+
+                <div className="synthesis-title-group">
+                  <span className="synthesis-eyebrow">Pixovo Editorial Engine</span>
+                  <h3>Synthesizing Your Photobook Editions</h3>
+                  <p>{jobMessage || 'Processing layout intelligence...'}</p>
+                </div>
+
+                <div className="synthesis-timer-pill">
+                  <Clock size={14} strokeWidth={1.75} />
+                  <span>{elapsedSeconds}s</span>
                 </div>
               </div>
 
-              <div className="synthesis-title-group">
-                <span className="synthesis-eyebrow">Pixovo Editorial Engine</span>
-                <h3>Synthesizing Your Photobook Editions</h3>
-                <p>{jobMessage || 'Processing layout intelligence...'}</p>
+              <div className="synthesis-progress-track">
+                <div
+                  className="synthesis-progress-fill"
+                  style={{ width: `${displayProgress}%` }}
+                />
+              </div>
+              <div className="synthesis-progress-meta">
+                <span>Checkpoint Progress</span>
+                <span>{displayProgress}%</span>
               </div>
 
-              <div className="synthesis-timer-pill">
-                <Clock size={14} strokeWidth={1.75} />
-                <span>{elapsedSeconds}s</span>
+              <div className="synthesis-stage-list">
+                {SYNTHESIS_STAGES.map((stage) => {
+                  const state = getSynthesisStageState(stage);
+                  return (
+                    <div key={stage.id} className={`synthesis-stage-item ${state}`}>
+                      <div className="synthesis-stage-icon">
+                        {state === 'complete' ? (
+                          <Check size={14} strokeWidth={2.5} />
+                        ) : state === 'active' ? (
+                          <RefreshCw size={14} strokeWidth={2} className="animate-spin" />
+                        ) : (
+                          <span>0{stage.id}</span>
+                        )}
+                      </div>
+                      <div className="synthesis-stage-copy">{stage.copy}</div>
+                      <div className="synthesis-stage-badge">
+                        {state === 'complete'
+                          ? 'Verified'
+                          : state === 'active'
+                          ? 'In Progress'
+                          : 'Queued'}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="synthesis-fact-ticker" key={factIndex}>
+                <span>{MICRO_FACTS[factIndex]}</span>
               </div>
             </div>
 
-            {/* Smoothly Interpolated Progress Track Bound to Real Checkpoints */}
-            <div className="synthesis-progress-track">
-              <div
-                className="synthesis-progress-fill"
-                style={{ width: `${displayProgress}%` }}
-              />
-            </div>
-            <div className="synthesis-progress-meta">
-              <span>Checkpoint Progress</span>
-              <span>{displayProgress}%</span>
-            </div>
-
-            {/* 4-Stage Milestone List Strictly Gated by Real Backend Progress */}
-            <div className="synthesis-stage-list">
-              {SYNTHESIS_STAGES.map((stage) => {
-                const state = getSynthesisStageState(stage);
-                return (
-                  <div key={stage.id} className={`synthesis-stage-item ${state}`}>
-                    <div className="synthesis-stage-icon">
-                      {state === 'complete' ? (
-                        <Check size={14} strokeWidth={2.5} />
-                      ) : state === 'active' ? (
-                        <RefreshCw size={14} strokeWidth={2} className="animate-spin" />
-                      ) : (
-                        <span>0{stage.id}</span>
-                      )}
-                    </div>
-                    <div className="synthesis-stage-copy">{stage.copy}</div>
-                    <div className="synthesis-stage-badge">
-                      {state === 'complete'
-                        ? 'Verified'
-                        : state === 'active'
-                        ? 'In Progress'
-                        : 'Queued'}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Rotating Micro-Facts Ticker */}
-            <div className="synthesis-fact-ticker" key={factIndex}>
-              <span>{MICRO_FACTS[factIndex]}</span>
-            </div>
+            {/* Stage 2.3 Task 4: Skeleton covers paint immediately as soon as themes_ready arrives */}
+            {skeletonThemes && skeletonThemes.length > 0 && (
+              <div className="step-enter-active" style={{ width: '100%' }}>
+                <BookCarousel3D
+                  variations={skeletonThemes}
+                  activeIdx={0}
+                  isSkeleton={true}
+                />
+              </div>
+            )}
           </div>
         )}
 
         {step === 'upload' && (
-          <PhotoUploader
-            onPhotosUploaded={handlePhotosUploaded}
-            isUploading={isLoading}
-          />
+          <div key="step-upload" className="step-enter-active" style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
+            <PhotoUploader
+              onPhotosUploaded={handlePhotosUploaded}
+              isUploading={isLoading}
+            />
+          </div>
         )}
 
         {step === 'chat' && (
-          <AIChatbotWidget
-            userPrompt={userPrompt}
-            setUserPrompt={setUserPrompt}
-            onGenerate={handleGenerateVariationsAsync}
-            isPhotoUploadComplete={isPhotoUploadComplete}
-            uploadedCount={uploadedCount}
-            isLoading={isLoading}
-            sessionId={sessionId}
-          />
+          <div key="step-chat" className="step-enter-active" style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.25rem' }}>
+            {/* Stage 2.2 Task 5 & Stage 2.3 Task 2: Keep photos visible with live curation state during ingest */}
+            {reconciledPhotos.length > 0 && (
+              <div className="curation-strip-card">
+                <div className="curation-strip-header">
+                  <div className="curation-strip-status">
+                    <span className="curation-strip-title">
+                      {isPhotoUploadComplete
+                        ? `Curation complete — ${ingestProgress.survived || uploadedPhotos.length} of ${uploadedCount || reconciledPhotos.length} kept`
+                        : `Uploading photos — ${ingestProgress.done} of ${Math.max(1, ingestProgress.total)} batches`}
+                    </span>
+                    <span className="curation-strip-subtitle">
+                      {`Analysing quality — ${ingestProgress.received || 0} of ${uploadedCount || reconciledPhotos.length} · ${ingestProgress.survived || uploadedPhotos.length} kept`}
+                    </span>
+                  </div>
+                  <span className="curation-strip-badge">
+                    {isPhotoUploadComplete ? 'Ready' : `${Math.round((ingestProgress.done / Math.max(1, ingestProgress.total)) * 100)}%`}
+                  </span>
+                </div>
+
+                {!isPhotoUploadComplete && ingestProgress.total > 0 && (
+                  <div className="curation-dual-bars">
+                    <div className="curation-bar-track">
+                      <div
+                        className="curation-bar-fill"
+                        style={{ width: `${Math.round((ingestProgress.done / Math.max(1, ingestProgress.total)) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div className="curation-strip-grid">
+                  {visibleCurationTiles.map((item) => (
+                    <div
+                      key={item.photo_id}
+                      className={`curation-tile curation-tile-${item.status}`}
+                      title={item.status === 'rejected' ? item.reject_reason || 'filtered' : item.filename}
+                    >
+                      <PhotoFrame
+                        src={item.url}
+                        aspectRatio={1}
+                        dominantColors={item.dominant_colors}
+                        alt={item.filename}
+                        style={{ width: '100%', height: '100%', borderRadius: '6px' }}
+                      />
+                      {item.status === 'rejected' && (
+                        <span className="curation-reject-tag">{item.reject_reason || 'filtered'}</span>
+                      )}
+                    </div>
+                  ))}
+                  {curationOverflow > 0 && (
+                    <div className="curation-tile curation-tile-more">
+                      +{curationOverflow}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <AIChatbotWidget
+              userPrompt={userPrompt}
+              setUserPrompt={setUserPrompt}
+              onGenerate={handleGenerateVariationsAsync}
+              isPhotoUploadComplete={isPhotoUploadComplete}
+              uploadedCount={uploadedCount}
+              isLoading={isLoading}
+              sessionId={sessionId}
+            />
+          </div>
         )}
 
         {step === 'preview' && (
-          <div className="story-preview-container">
+          <div key="step-preview" className="story-preview-container step-enter-active">
             <BookCarousel3D
               variations={variations}
               activeIdx={activeVarIdx}
@@ -801,6 +967,7 @@ export default function App() {
               targetRef={spreadsRef}
               onSpreadUpdate={handleSpreadUpdate}
               sessionId={sessionId}
+              photoLookup={serverPhotos}
             />
           </div>
         )}
