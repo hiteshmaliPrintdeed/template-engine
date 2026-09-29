@@ -27,6 +27,7 @@ export default function AIChatbotWidget({
   isPhotoUploadComplete,
   uploadedCount,
   isLoading,
+  isWaitingForIngest = false,
   sessionId
 }) {
   const [promptInput, setPromptInput] = useState(userPrompt || '');
@@ -393,11 +394,20 @@ export default function AIChatbotWidget({
           type="button"
           className="btn btn-primary studio-launch-btn"
           onClick={handleLaunchGeneration}
-          disabled={isLoading}
+          disabled={isLoading || isWaitingForIngest}
         >
-          <Sparkles size={16} strokeWidth={1.75} />
-          <span>Generate Photobook Variations</span>
-          <ArrowRight size={16} strokeWidth={1.75} />
+          {isWaitingForIngest ? (
+            <>
+              <RefreshCw size={16} strokeWidth={1.75} className="animate-spin" />
+              <span>Waiting for Curation...</span>
+            </>
+          ) : (
+            <>
+              <Sparkles size={16} strokeWidth={1.75} />
+              <span>Generate Photobook Variations</span>
+              <ArrowRight size={16} strokeWidth={1.75} />
+            </>
+          )}
         </button>
       </section>
     </div>

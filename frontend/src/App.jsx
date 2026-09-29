@@ -67,6 +67,7 @@ function AppContent() {
   });
   const [currentJobId, setCurrentJobId] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isWaitingForIngest, setIsWaitingForIngest] = useState(false);
   const [isReshufflingVars, setIsReshufflingVars] = useState(false);
   const [jobProgress, setJobProgress] = useState(0);
   const [jobStatus, setJobStatus] = useState('idle');
@@ -97,6 +98,7 @@ function AppContent() {
 
   const spreadsRef = useRef(null);
   const uploadedPhotosRef = useRef([]);
+  const isIngestingRef = useRef(false);
   const localPreviewsRef = useRef([]);
   const sessionIdRef = useRef(sessionId);
   const originalsQueueRef = useRef({});
@@ -548,6 +550,7 @@ function AppContent() {
 
       const chunks = PixovoClientDownsampler.chunk(processedPhotos, chunk_size || 40);
       setIngestProgress({ done: 0, total: chunks.length, received: 0, survived: 0 });
+      isIngestingRef.current = true;
 
       const allPhotos = [];
       const allRejectReasons = [];
@@ -601,6 +604,8 @@ function AppContent() {
         }
       }
 
+      isIngestingRef.current = false;
+
       // Stage 2.4 Task 4: Actionable error when all photos were filtered out
       if (allPhotos.length === 0) {
         const summaryText = summarizeRejections(allRejectReasons);
@@ -627,6 +632,7 @@ function AppContent() {
       originalsQueueRef.current = survivorOrigMap;
       streamOriginalsInBackground(survivorOrigMap, session_id);
     } catch (e) {
+      isIngestingRef.current = false;
       console.error('[Phase 1 Ingestion] Upload failed:', e);
       toast.show({
         title: 'Upload session could not start',
@@ -643,17 +649,26 @@ function AppContent() {
   };
 
   const handleGenerateVariationsAsync = async (promptOverride, options = {}) => {
-    if (isLoading) return; // Prevent double-submit
+    if (isLoading || isWaitingForIngest) return; // Prevent double-submit
 
     let photosToUse = uploadedPhotos.length > 0 ? uploadedPhotos : uploadedPhotosRef.current;
-    if (photosToUse.length === 0 && uploadedCount > 0) {
-      for (let i = 0; i < 40; i++) {
-        if (uploadedPhotosRef.current.length > 0) {
+    if (isIngestingRef.current || (photosToUse.length === 0 && !isPhotoUploadComplete && uploadedCount > 0)) {
+      setIsWaitingForIngest(true);
+      toast.show({
+        title: 'Finishing photo curation...',
+        message: 'Generation will start automatically as soon as your photos finish uploading.',
+        tone: 'info',
+      });
+      // Wait up to 150 seconds for mobile/ngrok thumbnail ingestion to complete
+      for (let i = 0; i < 600; i++) {
+        if (!isIngestingRef.current) {
           photosToUse = uploadedPhotosRef.current;
           break;
         }
-        await new Promise((r) => setTimeout(r, 200));
+        await new Promise((r) => setTimeout(r, 250));
       }
+      photosToUse = uploadedPhotosRef.current;
+      setIsWaitingForIngest(false);
     }
 
     if (photosToUse.length === 0) {
@@ -1126,6 +1141,7 @@ function AppContent() {
               isPhotoUploadComplete={isPhotoUploadComplete}
               uploadedCount={uploadedCount}
               isLoading={isLoading}
+              isWaitingForIngest={isWaitingForIngest}
               sessionId={sessionId}
             />
           </div>

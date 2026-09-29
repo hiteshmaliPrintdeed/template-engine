@@ -305,10 +305,13 @@ def get_fallback_ai_response(
 
 
 def _call_with_timeout(fn, timeout_sec: float = GEMINI_TIMEOUT_SEC):
-    """Runs a blocking SDK call inside a 1-worker thread pool with a hard timeout."""
-    with ThreadPoolExecutor(max_workers=1) as pool:
+    """Runs a blocking SDK call inside a 1-worker thread pool with a hard non-blocking timeout."""
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
         future = pool.submit(fn)
         return future.result(timeout=timeout_sec)
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 def _invoke_gemini_json(prompt_text: str) -> Dict[str, Any]:
@@ -330,8 +333,8 @@ def _invoke_gemini_json(prompt_text: str) -> Dict[str, Any]:
             return json.loads(resp.text)
 
         return _call_with_timeout(_run_genai, GEMINI_TIMEOUT_SEC)
-    except Exception as e1:
-        logger.warning(f"[StoryAI] google-genai call failed or timed out ({e1}). Trying legacy google-generativeai SDK...")
+    except ImportError:
+        logger.info("[StoryAI] google-genai not installed; using legacy google-generativeai SDK...")
 
     import google.generativeai as genai_legacy
 
