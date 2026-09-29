@@ -207,6 +207,9 @@ _JOB_COLUMN_MIGRATIONS = [
     # the job's cached story content; without it, reshuffle can only rebuild the
     # book from job.result, which carries no captions.
     ("user_prompt", "TEXT"),
+    # 'vision' when the book opted in to Gemini seeing its photos, else
+    # 'chapter'. Reshuffle reads it to find the chapter content the job used.
+    ("caption_strategy", "TEXT"),
 ]
 
 
@@ -752,6 +755,14 @@ class SessionStore:
         return row["user_prompt"] if row else None
 
     @staticmethod
+    def get_job_caption_strategy(job_id: str) -> Optional[str]:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT caption_strategy FROM jobs WHERE job_id = ?", (job_id,))
+        row = cur.fetchone()
+        return row["caption_strategy"] if row else None
+
+    @staticmethod
     def save_session_preferences(
         session_id: Optional[str],
         custom_title: Optional[str] = None,
@@ -835,6 +846,7 @@ class SessionStore:
         include_text: Optional[bool] = None,
         subtitle: Optional[str] = None,
         user_prompt: Optional[str] = None,
+        caption_strategy: Optional[str] = None,
     ) -> None:
         conn = get_db_connection()
         result_json = None
@@ -847,7 +859,7 @@ class SessionStore:
         # Preserve existing preferences on the job row if not explicitly overridden
         cur = conn.cursor()
         cur.execute(
-            "SELECT session_id, custom_title, include_text, subtitle, user_prompt FROM jobs WHERE job_id = ?",
+            "SELECT session_id, custom_title, include_text, subtitle, user_prompt, caption_strategy FROM jobs WHERE job_id = ?",
             (job.job_id,),
         )
         existing = cur.fetchone()
@@ -864,13 +876,16 @@ class SessionStore:
         # row, so a column left out of the statement below is reset to NULL on
         # every progress update _update_job writes.
         eff_prompt = user_prompt if user_prompt is not None else (existing["user_prompt"] if existing else None)
+        eff_strategy = caption_strategy if caption_strategy is not None else (
+            existing["caption_strategy"] if existing else None
+        )
 
         with conn:
             conn.execute("""
                 INSERT OR REPLACE INTO jobs (
                     job_id, session_id, status, progress, message, variations_json, error_message,
-                    custom_title, include_text, subtitle, user_prompt, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    custom_title, include_text, subtitle, user_prompt, caption_strategy, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """, (
                 job.job_id,
                 eff_session,
@@ -883,6 +898,7 @@ class SessionStore:
                 eff_inc,
                 eff_sub,
                 eff_prompt,
+                eff_strategy,
             ))
             if eff_session and (custom_title is not None or include_text is not None or subtitle is not None):
                 conn.execute(

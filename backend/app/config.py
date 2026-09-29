@@ -147,7 +147,30 @@ GEMINI_CHAPTER_TIMEOUT_SEC = _env_float("PIXOVO_GEMINI_CHAPTER_TIMEOUT_SEC", 20.
 
 # Per-chapter captions from Gemini. Off restores book-level captions (one pool
 # per variation) without a redeploy. Has no effect when GEMINI_API_KEY is unset.
+# Kept as an alias: PIXOVO_CHAPTER_CAPTIONS=0 means CAPTION_STRATEGY=generic.
 CHAPTER_CAPTIONS_ENABLED = _env_bool("PIXOVO_CHAPTER_CAPTIONS", True)
+
+# How story segments get their captions:
+#   generic -- book-level caption pools only, no chapter call
+#   chapter -- one text-only Gemini call from per-segment facts
+#   vision  -- Gemini also SEES ~3 representative thumbnails per segment, but
+#              only for books whose user opted in (use_photo_vision); every
+#              other book uses 'chapter'. The opt-in, not this setting, is what
+#              sends photos to Google.
+CAPTION_STRATEGIES = ("generic", "chapter", "vision")
+CAPTION_STRATEGY = _env_str("PIXOVO_CAPTION_STRATEGY", "vision").lower()
+if CAPTION_STRATEGY not in CAPTION_STRATEGIES:
+    raise RuntimeError(
+        f"PIXOVO_CAPTION_STRATEGY must be one of {', '.join(CAPTION_STRATEGIES)}, "
+        f"got {CAPTION_STRATEGY!r}. Leave it empty for the default (vision)."
+    )
+if not CHAPTER_CAPTIONS_ENABLED:
+    CAPTION_STRATEGY = "generic"
+
+# Total wall-clock allowance for one book's vision pass. Segments not captioned
+# by then use text-only chapter captions for this generation; calls already in
+# flight still finish and cache their result for the next generate.
+GEMINI_VISION_BUDGET_SEC = _env_float("PIXOVO_GEMINI_VISION_BUDGET_SEC", 45.0)
 
 # ----------------------------------------------------------------------
 # Ingestion limits (Stage 1.1)

@@ -531,10 +531,81 @@ def book_cache_key(prompt: str, prompt_version: str) -> str:
     return "book:" + hashlib.sha256(f"{normalize_prompt(prompt)}|{prompt_version}".encode()).hexdigest()
 
 
-def chapter_cache_key(prompt: str, signature: str, prompt_version: str) -> str:
-    return "chapters:" + hashlib.sha256(
-        f"{normalize_prompt(prompt)}|{signature}|{prompt_version}".encode()
+def chapter_cache_key(prompt: str, signature: str, prompt_version: str, strategy: str = "chapter") -> str:
+    """
+    The whole book's chapter content. Text and vision content for the same
+    photos are different content, so the strategy is part of the key. The
+    'chapter' key is left exactly as it was, so existing entries stay valid.
+    """
+    ident = f"{normalize_prompt(prompt)}|{signature}|{prompt_version}"
+    if strategy != "chapter":
+        ident += f"|{strategy}"
+    return "chapters:" + hashlib.sha256(ident.encode()).hexdigest()
+
+
+def segment_cache_key(
+    prompt: str, category: str, position: str, representative_ids: Sequence[str], prompt_version: str
+) -> str:
+    """
+    One segment's vision captions. Identified by everything the request is built
+    from: the prompt, category, story position and the exact images shown. Photo
+    ids are unique and immutable, so they stand in for the images themselves --
+    changing one segment's photos re-captions only that segment.
+    """
+    ids = ",".join(sorted(representative_ids))
+    return "segment:" + hashlib.sha256(
+        f"{normalize_prompt(prompt)}|{category}|{position}|{ids}|{prompt_version}".encode()
     ).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Vision captions: stricter than text captions, because the model is now
+# describing pixels and is tempted to narrate the medium or over-read a scene.
+# ---------------------------------------------------------------------------
+
+VISION_MIN_WORDS = 3
+VISION_MAX_WORDS = 8
+VISION_TITLE_MAX_WORDS = 6
+
+# Captions sit under the photos; naming the medium ("a photo of...") reads as a
+# description of the book rather than of the moment.
+_META_WORDS = re.compile(
+    r"\b(photos?|photographs?|images?|pictures?|pics?|shots?|snapshots?|captured?|capturing|camera|frames?)\b",
+    re.IGNORECASE,
+)
+
+
+def _no_meta(text: Optional[str]) -> Optional[str]:
+    return None if text is None or _META_WORDS.search(text) else text
+
+
+def valid_vision_caption(value: Any) -> Optional[str]:
+    text = _no_meta(valid_caption(value))
+    if text is None or not (VISION_MIN_WORDS <= len(text.split()) <= VISION_MAX_WORDS):
+        return None
+    return text
+
+
+def valid_vision_title(value: Any) -> Optional[str]:
+    text = _no_meta(valid_caption(value))
+    if text is None or len(text.split()) > VISION_TITLE_MAX_WORDS:
+        return None
+    return text
+
+
+def validate_vision_segment(raw: Any) -> SegmentContent:
+    """One segment's vision response -> SegmentContent, or StoryContentInvalid."""
+    if not isinstance(raw, dict):
+        raise StoryContentInvalid("response is not a JSON object")
+    title = valid_vision_title(raw.get("title"))
+    captions = clean_pool(raw.get("captions"), valid_vision_caption, MAX_SEGMENT_CAPTIONS)
+    if title:
+        captions = [c for c in captions if c.upper() != title.upper()]
+    if title is None:
+        raise StoryContentInvalid(f"unusable title {raw.get('title')!r}")
+    if len(captions) < MIN_SEGMENT_CAPTIONS:
+        raise StoryContentInvalid(f"{len(captions)} usable captions, need {MIN_SEGMENT_CAPTIONS}")
+    return SegmentContent(title=title, captions=captions)
 
 
 def is_chapter_label(text: Optional[str]) -> bool:

@@ -813,6 +813,7 @@ def reshuffle_job_variations(req: VariationsReshuffleRequest):
         job.result.variations,
         photos,
         include_text=prefs["include_text"],
+        caption_strategy=SessionStore.get_job_caption_strategy(req.job_id),
     )
 
     new_variations = generate_photobook_variations_engine(
@@ -1584,6 +1585,7 @@ async def process_async_job(
     custom_title: Optional[str] = None,
     include_text: bool = True,
     subtitle: Optional[str] = None,
+    use_photo_vision: bool = False,
 ):
     """
     Background worker, bounded by CONCURRENCY_SEMAPHORE.
@@ -1645,6 +1647,7 @@ async def process_async_job(
                     include_text,
                     subtitle,
                     story_context=story_context,
+                    use_photo_vision=use_photo_vision,
                 ),
             )
 
@@ -1726,6 +1729,7 @@ async def generate_async(payload: GenerateVariationsRequest, background_tasks: B
         include_text=payload.include_text,
         subtitle=payload.subtitle,
         user_prompt=payload.user_prompt,
+        caption_strategy="vision" if payload.use_photo_vision else "chapter",
     )
 
     background_tasks.add_task(
@@ -1737,6 +1741,7 @@ async def generate_async(payload: GenerateVariationsRequest, background_tasks: B
         payload.custom_title,
         payload.include_text,
         payload.subtitle,
+        payload.use_photo_vision,
     )
 
     return initial_job

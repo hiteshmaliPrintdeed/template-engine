@@ -37,6 +37,8 @@ export default function AIChatbotWidget({
   const [customTitle, setCustomTitle] = useState('');
   const [customSubtitle, setCustomSubtitle] = useState('');
   const [includeText, setIncludeText] = useState(true);
+  // Opt-in, off by default: only when ticked are a few photos sent to Gemini.
+  const [usePhotoVision, setUsePhotoVision] = useState(false);
 
   const handleSelectPill = (pill) => {
     setSelectedPill(pill);
@@ -120,7 +122,9 @@ export default function AIChatbotWidget({
     onGenerate(effectivePrompt, {
       custom_title: trimmedTitle,
       include_text: includeText,
-      subtitle: trimmedSubtitle
+      subtitle: trimmedSubtitle,
+      // Meaningless without captions, so never sent as true for photo-only books.
+      use_photo_vision: includeText && usePhotoVision
     });
   };
 
@@ -366,6 +370,34 @@ export default function AIChatbotWidget({
             </div>
           </button>
         </div>
+
+        {includeText && (
+          <label
+            className="studio-vision-optin"
+            style={{
+              display: 'flex',
+              gap: '10px',
+              alignItems: 'flex-start',
+              marginTop: '14px',
+              cursor: isLoading ? 'default' : 'pointer'
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={usePhotoVision}
+              onChange={(e) => setUsePhotoVision(e.target.checked)}
+              disabled={isLoading}
+              style={{ marginTop: '3px', accentColor: 'var(--px-brand-iris)' }}
+            />
+            <span>
+              <strong>Let AI look at a few of my photos to write captions</strong>
+              <br />
+              <small style={{ opacity: 0.75 }}>
+                About 3 photos per chapter are sent to Google Gemini. Off by default.
+              </small>
+            </span>
+          </label>
+        )}
       </section>
 
       {/* Stage 4: Summary Review & Launch Action */}
@@ -384,7 +416,11 @@ export default function AIChatbotWidget({
           <div className="studio-summary-item">
             <span className="studio-summary-label">Inner Spreads</span>
             <span className="studio-summary-badge">
-              {includeText ? 'Narrative Captions' : 'Photo-Only (Zero Text)'}
+              {includeText
+                ? usePhotoVision
+                  ? 'Narrative Captions · AI reads photos'
+                  : 'Narrative Captions'
+                : 'Photo-Only (Zero Text)'}
             </span>
           </div>
         </div>
