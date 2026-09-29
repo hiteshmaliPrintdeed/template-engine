@@ -1,37 +1,119 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Sparkles,
   Type,
   BookOpen,
-  Image,
+  Image as ImageIcon,
   Check,
-  ArrowRight,
+  ArrowUp,
   RefreshCw,
   Compass,
+  Heart,
+  Users,
+  Sun,
+  Calendar,
+  MapPin,
+  UploadCloud,
+  Plus,
+  X,
   Edit3
 } from 'lucide-react';
+import PixovoClientDownsampler from '../utils/client_downsampler';
+import PhotoFrame from './PhotoFrame';
+import { useToast } from './Toast';
 
-const OCCASION_PILLS = [
-  'Road Trip',
-  'Family Holiday',
-  'Wedding Celebration',
-  'Milestone',
-  'Weekend Journey',
-  'Birthday Gathering'
+const OCCASION_CARDS = [
+  {
+    id: 'trip',
+    title: 'My last trip',
+    subtitle: 'Road trips, vacations & scenic adventures',
+    prompt: 'My last trip',
+    gradient: 'linear-gradient(135deg, #512dcb 0%, #8678ff 55%, #fdd3ad 100%)',
+    Icon: Compass
+  },
+  {
+    id: 'gift',
+    title: 'A heartfelt gift',
+    subtitle: 'Celebrations, tributes & keepsakes',
+    prompt: 'A heartfelt gift for someone special',
+    gradient: 'linear-gradient(135deg, #f066b4 0%, #8678ff 60%, #fdd3ad 100%)',
+    Icon: Heart
+  },
+  {
+    id: 'family',
+    title: 'Family milestones',
+    subtitle: 'Holidays, reunions & everyday joy',
+    prompt: 'Family holiday and milestones',
+    gradient: 'linear-gradient(135deg, #512dcb 0%, #f066b4 100%)',
+    Icon: Users
+  },
+  {
+    id: 'wedding',
+    title: 'Wedding & love',
+    subtitle: 'Ceremonies, vows & romantic memories',
+    prompt: 'Wedding celebration and love story',
+    gradient: 'linear-gradient(135deg, #17012e 0%, #512dcb 55%, #f066b4 100%)',
+    Icon: Sparkles
+  },
+  {
+    id: 'year',
+    title: 'Year in review',
+    subtitle: 'Highlights from a whole year together',
+    prompt: 'Our year in review — favorite memories',
+    gradient: 'linear-gradient(135deg, #8678ff 0%, #f066b4 60%, #fdd3ad 100%)',
+    Icon: Calendar
+  },
+  {
+    id: 'weekend',
+    title: 'Weekend getaway',
+    subtitle: 'Short escapes with friends & family',
+    prompt: 'Weekend getaway adventure',
+    gradient: 'linear-gradient(135deg, #3f20a8 0%, #8678ff 100%)',
+    Icon: Sun
+  }
+];
+
+const FOLLOWUP_CHIPS = [
+  'With family & kids',
+  'With my partner',
+  'With close friends',
+  'Scenic views & landmarks',
+  'Candid moments & laughter',
+  'Warm & nostalgic vibe'
 ];
 
 export default function AIChatbotWidget({
   userPrompt,
   setUserPrompt,
   onGenerate,
+  onPhotosUploaded,
+  reconciledPhotos = [],
+  ingestProgress = { done: 0, total: 0, received: 0, survived: 0 },
   isPhotoUploadComplete,
   uploadedCount,
   isLoading,
   isWaitingForIngest = false,
   sessionId
 }) {
-  const [promptInput, setPromptInput] = useState(userPrompt || '');
-  const [selectedPill, setSelectedPill] = useState('');
+  const toast = useToast();
+
+  // Conversational messages list: [{ id, role: 'user' | 'ai', text }]
+  const [messages, setMessages] = useState(() => {
+    if (userPrompt && userPrompt.trim()) {
+      return [
+        { id: 'init-user', role: 'user', text: userPrompt.trim() },
+        {
+          id: 'init-ai',
+          role: 'ai',
+          text: "That sounds like a wonderful book! Tell me a little more about the setting, who was there, or any special moments you'd like to highlight."
+        }
+      ];
+    }
+    return [];
+  });
+
+  const [chatInput, setChatInput] = useState('');
+  const [selectedChips, setSelectedChips] = useState([]);
   const [isSuggestingTitles, setIsSuggestingTitles] = useState(false);
   const [suggestions, setSuggestions] = useState(null);
   const [selectedTitleIdx, setSelectedTitleIdx] = useState(null);
@@ -39,26 +121,217 @@ export default function AIChatbotWidget({
   const [customSubtitle, setCustomSubtitle] = useState('');
   const [includeText, setIncludeText] = useState(true);
 
-  const handleSelectPill = (pill) => {
-    setSelectedPill(pill);
-    if (!promptInput.trim()) {
-      setPromptInput(pill);
-      setUserPrompt(pill);
-    } else if (!promptInput.toLowerCase().includes(pill.toLowerCase())) {
-      const next = `${pill} — ${promptInput}`;
-      setPromptInput(next);
-      setUserPrompt(next);
+  // Local worker downsampling states
+  const [isDownsampling, setIsDownsampling] = useState(false);
+  const [downsampleStats, setDownsampleStats] = useState({ completed: 0, total: 0 });
+  const [dragActive, setDragActive] = useState(false);
+  const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
+
+  const fileInputRef = useRef(null);
+  const threadEndRef = useRef(null);
+  const downsamplerRef = useRef(null);
+
+  if (!downsamplerRef.current) {
+    downsamplerRef.current = new PixovoClientDownsampler({
+      maxDimension: 512,
+      quality: 0.85
+    });
+  }
+
+  useEffect(() => {
+    return () => {
+      downsamplerRef.current?.terminate();
+    };
+  }, []);
+
+  // Determine if user has entered the active conversational thread
+  const hasStartedStory =
+    messages.length > 0 || uploadedCount > 0 || isDownsampling || reconciledPhotos.length > 0;
+
+  // Build combined narrative prompt from user messages + selected chips
+  const computeEffectivePrompt = (msgs = messages, chips = selectedChips) => {
+    const userTexts = msgs.filter((m) => m.role === 'user').map((m) => m.text);
+    const base = userTexts.join(' — ');
+    const chipStr = chips.length > 0 ? ` (${chips.join(', ')})` : '';
+    return (base + chipStr).trim() || userPrompt || 'Cherished Memories';
+  };
+
+  const generateContextualReply = (text, currentTurnCount) => {
+    const lower = text.toLowerCase();
+    if (currentTurnCount === 0) {
+      if (lower.includes('trip') || lower.includes('vacation') || lower.includes('travel') || lower.includes('getaway')) {
+        return "I'd love to help you capture that journey! Where did you travel, who joined you, and what were your favorite moments?";
+      }
+      if (lower.includes('gift') || lower.includes('heartfelt')) {
+        return "A custom photo book makes an unforgettable gift. Who is this book for, and what memories or message are you celebrating?";
+      }
+      if (lower.includes('wedding') || lower.includes('love')) {
+        return "Congratulations! Tell me about the celebration — the venue, the atmosphere, or the moments that meant the most.";
+      }
+      if (lower.includes('family') || lower.includes('milestone')) {
+        return "Family stories are timeless. Which milestones, traditions, or everyday moments are we bringing together in this book?";
+      }
+      return "That sounds like a wonderful story! Tell me a little more — who was there, where did it take place, or what mood should the book have?";
+    }
+    return "Got it — I've woven those details into your story direction. You can keep adding notes below, manage your photos, or tap 'Start creating my book' whenever you're ready.";
+  };
+
+  const handleStartWithOccasion = (card) => {
+    const userMsg = { id: `u-${Date.now()}`, role: 'user', text: card.title };
+    const aiMsg = {
+      id: `a-${Date.now() + 1}`,
+      role: 'ai',
+      text: generateContextualReply(card.title, messages.length)
+    };
+    const nextMsgs = [...messages, userMsg, aiMsg];
+    setMessages(nextMsgs);
+    const nextPrompt = computeEffectivePrompt(nextMsgs, selectedChips);
+    setUserPrompt(nextPrompt);
+  };
+
+  const handleSendMessage = (e) => {
+    if (e) e.preventDefault();
+    const trimmed = chatInput.trim();
+    if (!trimmed) return;
+
+    const userMsg = { id: `u-${Date.now()}`, role: 'user', text: trimmed };
+    const aiMsg = {
+      id: `a-${Date.now() + 1}`,
+      role: 'ai',
+      text: generateContextualReply(trimmed, messages.length)
+    };
+    const nextMsgs = [...messages, userMsg, aiMsg];
+    setMessages(nextMsgs);
+    setChatInput('');
+
+    const nextPrompt = computeEffectivePrompt(nextMsgs, selectedChips);
+    setUserPrompt(nextPrompt);
+
+    setTimeout(() => {
+      threadEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 80);
+  };
+
+  const handleToggleFollowupChip = (chip) => {
+    const exists = selectedChips.includes(chip);
+    const nextChips = exists
+      ? selectedChips.filter((c) => c !== chip)
+      : [...selectedChips, chip];
+    setSelectedChips(nextChips);
+    const nextPrompt = computeEffectivePrompt(messages, nextChips);
+    setUserPrompt(nextPrompt);
+  };
+
+  // Handle file selection & 512px Web Worker downsampling inline inside Story Mode
+  const handleFilesSelected = async (files) => {
+    if (!files || files.length === 0) return;
+    const fileList = Array.from(files).filter(
+      (f) => f.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|tiff)$/i.test(f.name)
+    );
+
+    if (fileList.length === 0) {
+      toast.show({
+        title: 'Unsupported file format',
+        message: 'Please select valid image files (JPEG, PNG, or WebP).',
+        tone: 'warning'
+      });
+      return;
+    }
+
+    // If user jumped straight to uploading photos before picking an occasion, add a welcoming turn
+    if (messages.length === 0) {
+      setMessages([
+        {
+          id: `u-photos-${Date.now()}`,
+          role: 'user',
+          text: `Added ${fileList.length} photos to start my book`
+        },
+        {
+          id: `a-photos-${Date.now() + 1}`,
+          role: 'ai',
+          text: "Awesome! While your photos are uploading, tell me a little about the story behind them — what's the occasion or mood?"
+        }
+      ]);
+    }
+
+    setIsDownsampling(true);
+    setDownsampleStats({ completed: 0, total: fileList.length });
+
+    const startTime = performance.now();
+    try {
+      const downsampler = downsamplerRef.current;
+      const processedResults = await downsampler.processBatch(fileList, (completed, total) => {
+        setDownsampleStats({ completed, total });
+      });
+
+      if (!processedResults || processedResults.length === 0) {
+        throw new Error('None of the selected files could be decoded as images.');
+      }
+
+      const totalDownsampleTimeMs = performance.now() - startTime;
+      const previewItems = processedResults.map((p) => ({
+        photo_id: p.photo_id,
+        filename: p.filename,
+        aspect_ratio: p.aspect_ratio,
+        previewUrl: p.thumbnail_blob ? URL.createObjectURL(p.thumbnail_blob) : '',
+        originalFile: p.original_file,
+        thumbnailBlob: p.thumbnail_blob
+      }));
+
+      setIsDownsampling(false);
+
+      if (onPhotosUploaded) {
+        onPhotosUploaded({
+          processedCount: processedResults.length,
+          processedPhotos: processedResults,
+          previewItems,
+          downsampler,
+          downsampleTimeMs: totalDownsampleTimeMs
+        });
+      }
+    } catch (err) {
+      console.error('[StoryMode] Downsampling error:', err);
+      setIsDownsampling(false);
+      toast.show({
+        title: 'Photo processing failed',
+        message: err.message || 'Could not process the selected images. Please try another batch.',
+        tone: 'error'
+      });
     }
   };
 
-  const handlePromptChange = (e) => {
-    const val = e.target.value;
-    setPromptInput(val);
-    setUserPrompt(val);
+  const handleFileInputChange = (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      handleFilesSelected(e.target.files);
+      e.target.value = '';
+    }
+  };
+
+  const handleDrag = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === 'dragenter' || e.type === 'dragover') {
+      setDragActive(true);
+    } else if (e.type === 'dragleave') {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFilesSelected(e.dataTransfer.files);
+    }
+  };
+
+  const triggerFilePicker = () => {
+    fileInputRef.current?.click();
   };
 
   const handleSuggestTitles = async () => {
-    const query = promptInput.trim() || selectedPill || 'Cherished Memories';
+    const query = computeEffectivePrompt();
     setIsSuggestingTitles(true);
     try {
       const res = await fetch('/api/chat/suggest-titles', {
@@ -66,7 +339,7 @@ export default function AIChatbotWidget({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_prompt: query,
-          photo_count: uploadedCount || 0,
+          photo_count: uploadedCount || reconciledPhotos.length || 0,
           session_id: sessionId || null
         })
       });
@@ -100,316 +373,586 @@ export default function AIChatbotWidget({
     setCustomSubtitle(sub);
   };
 
-  const handleCustomTitleInput = (e) => {
-    setSelectedTitleIdx(null);
-    setCustomTitle(e.target.value);
-  };
+  const handleLaunchBookCreation = () => {
+    if (uploadedCount === 0 && reconciledPhotos.length === 0 && !isDownsampling) {
+      toast.show({
+        title: 'Add your photos first',
+        message: 'Select the photos you want in your book so we can design your pages.',
+        tone: 'info'
+      });
+      triggerFilePicker();
+      return;
+    }
 
-  const handleCustomSubtitleInput = (e) => {
-    setCustomSubtitle(e.target.value);
-  };
-
-  const handleLaunchGeneration = (e) => {
-    if (e) e.preventDefault();
-    const effectivePrompt =
-      promptInput.trim() || selectedPill || 'Cherished Memories';
+    const effectivePrompt = computeEffectivePrompt();
     setUserPrompt(effectivePrompt);
 
-    const trimmedTitle = customTitle.trim() || null;
-    const trimmedSubtitle = customSubtitle.trim() || null;
-
     onGenerate(effectivePrompt, {
-      custom_title: trimmedTitle,
+      custom_title: customTitle.trim() || null,
       include_text: includeText,
-      subtitle: trimmedSubtitle
+      subtitle: customSubtitle.trim() || null
     });
   };
 
-  const displayTitlePreview =
-    customTitle.trim() ||
-    (promptInput.trim() ? promptInput.trim().toUpperCase() : 'YOUR PHOTOBOOK');
+  // Calculate inline upload numbers for Mixbook strip
+  const totalCount = isDownsampling
+    ? downsampleStats.total
+    : uploadedCount || reconciledPhotos.length;
+  const completedCount = isDownsampling
+    ? downsampleStats.completed
+    : isPhotoUploadComplete
+    ? totalCount
+    : ingestProgress.received || 0;
+  const survivedCount = ingestProgress.survived || reconciledPhotos.filter((p) => p.status !== 'rejected').length;
+  const uploadPct =
+    totalCount > 0 ? Math.min(100, Math.round((completedCount / Math.max(1, totalCount)) * 100)) : 0;
 
-  const displaySubtitlePreview =
-    customSubtitle.trim() || 'A COLLECTION OF MEMORIES';
+  const inlineStripThumbs = reconciledPhotos.slice(0, 8);
+  const shimmerPlaceholderCount =
+    !isPhotoUploadComplete || isDownsampling
+      ? Math.max(2, Math.min(4, totalCount - inlineStripThumbs.length))
+      : 0;
 
   return (
-    <div className="step-card studio-configurator-card">
-      {/* Top Ingestion & Readiness Banner */}
-      <div
-        className="studio-status-banner"
-        style={{
-          backgroundColor: isPhotoUploadComplete
-            ? 'var(--px-status-success-bg)'
-            : 'var(--px-brand-iris-subtle)',
-          borderColor: isPhotoUploadComplete
-            ? 'var(--px-status-success-border)'
-            : 'var(--px-brand-iris-border)',
-          color: isPhotoUploadComplete
-            ? 'var(--px-status-success-text)'
-            : 'var(--px-brand-iris-active)'
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-          {isPhotoUploadComplete ? (
-            <Check size={16} strokeWidth={2} />
-          ) : (
-            <RefreshCw size={16} strokeWidth={2} className="animate-spin" />
-          )}
-          <span style={{ fontWeight: 600 }}>
-            {isPhotoUploadComplete
-              ? `${uploadedCount} Photos Verified & Color Harmonies Indexed`
-              : `Indexing & Downsampling ${uploadedCount} Photos in Background...`}
-          </span>
-        </div>
-        <span className="studio-status-meta">Guided Story Studio</span>
-      </div>
+    <div
+      className="mx-story-shell"
+      onDragEnter={handleDrag}
+      onDragOver={handleDrag}
+      onDragLeave={handleDrag}
+      onDrop={handleDrop}
+    >
+      {/* Hidden File Input for Inline Story Mode Photo Selection */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept="image/*"
+        onChange={handleFileInputChange}
+        style={{ display: 'none' }}
+        disabled={isLoading || isDownsampling}
+      />
 
-      <div className="studio-header">
-        <h2>Design Your Editorial Photobook</h2>
-        <p>
-          Configure your narrative direction, cover jacket typography, and inner
-          spread layout density before synthesizing your three bespoke book
-          editions.
-        </p>
-      </div>
-
-      {/* Stage 1: Occasion Narrative & Category Chips */}
-      <section className="studio-section">
-        <div className="studio-section-header">
-          <span className="studio-stage-Index">01</span>
-          <div>
-            <h3>Story &amp; Occasion Narrative</h3>
-            <p>Describe the setting, people, or mood of your collection.</p>
+      {/* =================================================================
+          SCREEN 1: MIXBOOK STORY MODE WELCOME (Before Prompt or Photos)
+          ================================================================= */}
+      {!hasStartedStory && (
+        <>
+          <div className="mx-welcome-hero">
+            <span className="mx-welcome-eyebrow">Welcome to Story Mode</span>
+            <h1 className="mx-welcome-title">What book are you creating today?</h1>
+            <p className="mx-welcome-subtitle">
+              Choose an occasion below, tell us in your own words, or add your photos right away.
+            </p>
           </div>
-        </div>
 
-        <div className="studio-pill-row">
-          <span className="studio-pill-label">
-            <Compass size={14} strokeWidth={1.75} />
-            <span>Occasion Presets</span>
-          </span>
-          <div className="pill-container">
-            {OCCASION_PILLS.map((pill) => {
-              const active = selectedPill === pill;
+          <div className="mx-occasion-dock-section">
+            <div className="mx-occasion-grid">
+              {OCCASION_CARDS.map((card) => {
+                const IconComponent = card.Icon;
+                return (
+                  <button
+                    key={card.id}
+                    type="button"
+                    className="mx-occasion-card"
+                    onClick={() => handleStartWithOccasion(card)}
+                  >
+                    <div
+                      className="mx-occasion-thumb"
+                      style={{ background: card.gradient }}
+                    >
+                      <IconComponent size={24} strokeWidth={1.85} color="#ffffff" />
+                    </div>
+                    <div className="mx-occasion-card-body">
+                      <span className="mx-occasion-card-title">{card.title}</span>
+                      <span className="mx-occasion-card-sub">{card.subtitle}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* =================================================================
+          SCREEN 2: MIXBOOK CONVERSATIONAL THREAD + INLINE UPLOAD & STYLE
+          ================================================================= */}
+      {hasStartedStory && (
+        <div className="mx-chat-thread">
+          {/* Render User & AI Conversation Turns */}
+          {messages.map((msg, idx) => {
+            if (msg.role === 'user') {
               return (
-                <button
-                  key={pill}
-                  type="button"
-                  className={`pill-tag ${active ? 'active' : ''}`}
-                  onClick={() => handleSelectPill(pill)}
-                  disabled={isLoading}
-                >
-                  {pill}
-                </button>
+                <div key={msg.id || idx} className="mx-user-bubble-row">
+                  <div className="mx-user-bubble">{msg.text}</div>
+                </div>
               );
-            })}
+            }
+            return (
+              <div key={msg.id || idx} className="mx-ai-turn">
+                <span className="mx-ai-badge">
+                  <Sparkles size={12} strokeWidth={2.2} />
+                  Story Mode
+                </span>
+                <p className="mx-ai-text">{msg.text}</p>
+
+                {/* Show Quick-Reply Story Details Chips under the first AI turn */}
+                {idx === 1 && (
+                  <div className="mx-Quick-chips">
+                    {FOLLOWUP_CHIPS.map((chip) => {
+                      const active = selectedChips.includes(chip);
+                      return (
+                        <button
+                          key={chip}
+                          type="button"
+                          className={`mx-chip-btn ${active ? 'active' : ''}`}
+                          onClick={() => handleToggleFollowupChip(chip)}
+                        >
+                          {active && (
+                            <Check
+                              size={13}
+                              strokeWidth={2.5}
+                              style={{ marginRight: '5px', verticalAlign: '-2px' }}
+                            />
+                          )}
+                          {chip}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Inline Photo Upload Turn (Mixbook Screen 2 replica) */}
+          <div className="mx-ai-turn">
+            <p className="mx-ai-text">
+              {totalCount === 0
+                ? "Now let's bring your photos into the story. Select up to 1,000 photos — we'll automatically filter out blurry shots and duplicates."
+                : isPhotoUploadComplete && !isDownsampling
+                ? `Great—your ${survivedCount} curated photos are ready! Tap the Photos button anytime to view or add more.`
+                : 'Great—your photos are uploading. Tap the Photos button to view and manage them.'}
+            </p>
+
+            {/* State A: 0 photos uploaded yet -> Inline Dropzone Card */}
+            {totalCount === 0 && !isDownsampling && (
+              <div
+                className="mx-inline-upload-card"
+                onClick={triggerFilePicker}
+                style={{
+                  cursor: 'pointer',
+                  borderStyle: dragActive ? 'solid' : 'dashed',
+                  borderColor: dragActive ? 'var(--mx-brand-purple)' : 'rgba(81, 45, 203, 0.28)',
+                  textAlign: 'center',
+                  padding: '1.75rem 1.25rem'
+                }}
+              >
+                <UploadCloud
+                  size={34}
+                  color="var(--mx-brand-purple)"
+                  strokeWidth={1.75}
+                  style={{ margin: '0 auto 0.6rem' }}
+                />
+                <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--mx-deep-purple)', marginBottom: '0.25rem' }}>
+                  Tap to add photos, or drag &amp; drop here
+                </div>
+                <div style={{ fontSize: '0.84rem', color: 'var(--px-text-secondary)' }}>
+                  Fast 512px client-side curation • Supports JPEG, PNG, WebP
+                </div>
+              </div>
+            )}
+
+            {/* State B: Photos Downsampling or Uploading/Ready -> Mixbook Inline Thumbnail Strip */}
+            {(totalCount > 0 || isDownsampling) && (
+              <div className="mx-inline-upload-card">
+                <div className="mx-inline-upload-header">
+                  <span className="mx-inline-upload-title">
+                    {isDownsampling ? (
+                      <>
+                        <RefreshCw size={15} className="animate-spin" color="var(--mx-brand-purple)" />
+                        <span>
+                          Preparing your photos ({downsampleStats.completed}/{downsampleStats.total})...
+                        </span>
+                      </>
+                    ) : !isPhotoUploadComplete ? (
+                      <>
+                        <RefreshCw size={15} className="animate-spin" color="var(--mx-brand-purple)" />
+                        <span>
+                          Uploading your photos ({completedCount}/{totalCount})...
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <Check size={16} strokeWidth={2.5} color="var(--px-status-success-text)" />
+                        <span>
+                          {survivedCount} photos curated &amp; ready ({totalCount} scanned)
+                        </span>
+                      </>
+                    )}
+                  </span>
+
+                  <button
+                    type="button"
+                    className="mx-chip-btn"
+                    style={{ padding: '0.32rem 0.75rem', fontSize: '0.78rem' }}
+                    onClick={() => setIsPhotoModalOpen(true)}
+                  >
+                    Manage Photos
+                  </button>
+                </div>
+
+                {/* Horizontal Square Thumbnail Strip + Mixbook Shimmer Placeholders */}
+                <div className="mx-inline-photo-strip">
+                  {inlineStripThumbs.map((item) => (
+                    <div
+                      key={item.photo_id}
+                      className={`mx-inline-photo-thumb ${item.status === 'rejected' ? 'rejected' : ''}`}
+                      onClick={() => setIsPhotoModalOpen(true)}
+                      title={item.filename}
+                    >
+                      <PhotoFrame
+                        src={item.url}
+                        aspectRatio={1}
+                        dominantColors={item.dominant_colors}
+                        alt={item.filename}
+                        style={{ width: '100%', height: '100%' }}
+                      />
+                    </div>
+                  ))}
+
+                  {Array.from({ length: shimmerPlaceholderCount }).map((_, sIdx) => (
+                    <div key={`shimmer-${sIdx}`} className="mx-inline-photo-shimmer" />
+                  ))}
+
+                  {reconciledPhotos.length > inlineStripThumbs.length && (
+                    <button
+                      type="button"
+                      onClick={() => setIsPhotoModalOpen(true)}
+                      style={{
+                        width: '74px',
+                        height: '74px',
+                        borderRadius: '12px',
+                        border: '1px solid var(--px-border-accent)',
+                        background: 'var(--px-brand-iris-subtle)',
+                        color: 'var(--mx-brand-purple)',
+                        fontWeight: 700,
+                        fontSize: '0.84rem',
+                        flexShrink: 0,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      +{reconciledPhotos.length - inlineStripThumbs.length}
+                    </button>
+                  )}
+                </div>
+
+                {/* Progress Bar */}
+                {(!isPhotoUploadComplete || isDownsampling) && (
+                  <div className="mx-inline-progress-bar">
+                    <div
+                      className="mx-inline-progress-fill"
+                      style={{ width: `${Math.max(8, uploadPct)}%` }}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-        </div>
 
-        <textarea
-          className="studio-textarea"
-          rows={2}
-          value={promptInput}
-          onChange={handlePromptChange}
-          placeholder="Describe your story or occasion (e.g., Summer coastal road trip along Big Sur with family)..."
-          disabled={isLoading}
-        />
-      </section>
+          {/* Turn 3: Inline Story Style, Cover Title & Mixbook "Start creating my book" CTA */}
+          <div className="mx-ai-turn">
+            <p className="mx-ai-text">
+              How should we style your pages and cover? Choose your storytelling preference below, then tap{' '}
+              <strong>Start creating my book</strong> to reveal 3 custom editions.
+            </p>
 
-      {/* Stage 2: Cover Title Studio */}
-      <section className="studio-section">
-        <div className="studio-section-header" style={{ justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
-            <span className="studio-stage-Index">02</span>
-            <div>
-              <h3>Cover Title Studio</h3>
-              <p>Brainstorm editorial titles with AI or enter your own jacket title.</p>
+            {/* 2 Storytelling Style Cards */}
+            <div className="mx-style-options-grid">
+              <button
+                type="button"
+                className={`mx-style-option-card ${includeText ? 'selected' : ''}`}
+                onClick={() => setIncludeText(true)}
+                disabled={isLoading}
+              >
+                <div className="mx-style-option-title">
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                    <BookOpen size={16} color="var(--mx-brand-purple)" />
+                    Storytelling Captions
+                  </span>
+                  {includeText && <Check size={16} strokeWidth={2.5} color="var(--mx-brand-purple)" />}
+                </div>
+                <div className="mx-style-option-desc">
+                  Pairs AI-crafted chapter headers and story captions alongside your photos.
+                </div>
+              </button>
+
+              <button
+                type="button"
+                className={`mx-style-option-card ${!includeText ? 'selected' : ''}`}
+                onClick={() => setIncludeText(false)}
+                disabled={isLoading}
+              >
+                <div className="mx-style-option-title">
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                    <ImageIcon size={16} color="var(--mx-brand-purple)" />
+                    Clean Photo-Forward
+                  </span>
+                  {!includeText && <Check size={16} strokeWidth={2.5} color="var(--mx-brand-purple)" />}
+                </div>
+                <div className="mx-style-option-desc">
+                  Dedicates 100% of every inner spread to photography with zero text boxes.
+                </div>
+              </button>
+            </div>
+
+            {/* Optional AI Cover Title Card */}
+            <div
+              style={{
+                marginTop: '0.85rem',
+                background: '#ffffff',
+                border: '1px solid rgba(81, 45, 203, 0.14)',
+                borderRadius: '18px',
+                padding: '1rem 1.15rem',
+                boxShadow: 'var(--px-shadow-sm)'
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: '0.75rem',
+                  flexWrap: 'wrap',
+                  marginBottom: '0.75rem'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontWeight: 700, fontSize: '0.9rem', color: 'var(--mx-deep-purple)' }}>
+                  <Type size={15} color="var(--mx-brand-purple)" />
+                  <span>Book Cover Title</span>
+                </div>
+
+                <button
+                  type="button"
+                  className="mx-chip-btn"
+                  style={{ padding: '0.35rem 0.85rem', fontSize: '0.8rem', fontWeight: 600 }}
+                  onClick={handleSuggestTitles}
+                  disabled={isLoading || isSuggestingTitles}
+                >
+                  {isSuggestingTitles ? (
+                    <>
+                      <RefreshCw size={13} className="animate-spin" style={{ marginRight: '5px', verticalAlign: '-2px' }} />
+                      Suggesting...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles size={13} color="var(--mx-brand-purple)" style={{ marginRight: '5px', verticalAlign: '-2px' }} />
+                      Suggest AI Titles
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {!isSuggestingTitles && suggestions && suggestions.titles && (
+                <div className="mx-Quick-chips" style={{ marginBottom: '0.75rem' }}>
+                  {suggestions.titles.slice(0, 4).map((title, idx) => {
+                    const isSelected = selectedTitleIdx === idx;
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        className={`mx-chip-btn ${isSelected ? 'active' : ''}`}
+                        onClick={() => handlePickSuggestedCard(idx)}
+                      >
+                        {title}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.65rem' }}>
+                <input
+                  type="text"
+                  className="studio-input"
+                  value={customTitle}
+                  onChange={(e) => {
+                    setSelectedTitleIdx(null);
+                    setCustomTitle(e.target.value);
+                  }}
+                  placeholder="Cover title (or leave blank for AI)..."
+                  disabled={isLoading}
+                />
+                <input
+                  type="text"
+                  className="studio-input"
+                  value={customSubtitle}
+                  onChange={(e) => setCustomSubtitle(e.target.value)}
+                  placeholder="Optional subtitle (e.g. SUMMER 2026)..."
+                  disabled={isLoading}
+                />
+              </div>
+            </div>
+
+            {/* Mixbook Signature Aurora CTA Button */}
+            <div style={{ marginTop: '1.25rem', display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="mx-btn-story-mode"
+                onClick={handleLaunchBookCreation}
+                disabled={isLoading || isWaitingForIngest || isDownsampling}
+              >
+                {isWaitingForIngest ? (
+                  <>
+                    <RefreshCw size={17} strokeWidth={2} className="animate-spin" />
+                    <span>Finishing photo upload...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={17} strokeWidth={2} />
+                    <span>Start creating my book</span>
+                  </>
+                )}
+              </button>
+
+              {totalCount > 0 && (
+                <span style={{ fontSize: '0.82rem', color: 'var(--px-text-secondary)', fontWeight: 500 }}>
+                  {isPhotoUploadComplete
+                    ? `${survivedCount} curated photos ready`
+                    : `Uploading (${completedCount}/${totalCount}) — you can tap Start anytime`}
+                </span>
+              )}
             </div>
           </div>
 
+          <div ref={threadEndRef} />
+        </div>
+      )}
+
+      {/* =================================================================
+          STICKY BOTTOM MIXBOOK AURORA DOCK (Pill Input + Send + Photos)
+          ================================================================= */}
+      <div className="mx-bottom-dock">
+        <div className="mx-bottom-dock-inner">
           <button
             type="button"
-            className="btn btn-secondary studio-ai-btn"
-            onClick={handleSuggestTitles}
-            disabled={isLoading || isSuggestingTitles}
+            className="mx-photos-dock-btn"
+            onClick={() => {
+              if (totalCount > 0) {
+                setIsPhotoModalOpen(true);
+              } else {
+                triggerFilePicker();
+              }
+            }}
+            title="Upload or manage your book photos"
           >
-            {isSuggestingTitles ? (
-              <RefreshCw size={15} strokeWidth={1.75} className="animate-spin" />
-            ) : (
-              <Sparkles size={15} strokeWidth={1.75} color="var(--px-brand-iris)" />
+            <ImageIcon size={17} strokeWidth={2} color="var(--mx-brand-purple)" />
+            <span>Photos</span>
+            {totalCount > 0 && (
+              <span className="mx-photos-count-badge">
+                {isPhotoUploadComplete ? survivedCount : `${completedCount}/${totalCount}`}
+              </span>
             )}
-            <span>{isSuggestingTitles ? 'Curating Titles...' : 'Generate AI Titles'}</span>
           </button>
+
+          <form className="mx-input-pill-bar" onSubmit={handleSendMessage}>
+            <input
+              type="text"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              placeholder={
+                hasStartedStory
+                  ? 'Message...'
+                  : 'Or tell us in your own words...'
+              }
+              disabled={isLoading}
+            />
+            <button
+              type="submit"
+              className="mx-send-circle-btn"
+              disabled={!chatInput.trim() || isLoading}
+              aria-label="Send message"
+            >
+              <ArrowUp size={18} strokeWidth={2.5} />
+            </button>
+          </form>
         </div>
+      </div>
 
-        {/* Shimmer Loading State */}
-        {isSuggestingTitles && (
-          <div className="studio-title-grid">
-            {[0, 1, 2, 3].map((n) => (
-              <div key={n} className="px-shimmer-card" />
-            ))}
-          </div>
-        )}
+      {/* =================================================================
+          PHOTO MANAGER DRAWER MODAL (When user taps "Photos")
+          ================================================================= */}
+      {isPhotoModalOpen && (
+        <div className="mx-modal-backdrop" onClick={() => setIsPhotoModalOpen(false)}>
+          <div className="mx-modal-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="mx-modal-header">
+              <div>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--mx-deep-purple)' }}>
+                  Your Book Photos ({survivedCount} Kept / {totalCount} Total)
+                </h3>
+                <p style={{ fontSize: '0.82rem', color: 'var(--px-text-secondary)' }}>
+                  {isPhotoUploadComplete
+                    ? 'Smart quality curation complete. Dimmed photos were filtered for blur or duplication.'
+                    : `Uploading & analysing quality (${completedCount} of ${totalCount})...`}
+                </p>
+              </div>
 
-        {/* 4 Selectable AI Title Cards */}
-        {!isSuggestingTitles && suggestions && suggestions.titles && (
-          <div className="studio-title-grid">
-            {suggestions.titles.slice(0, 4).map((title, idx) => {
-              const sub =
-                (suggestions.subtitles &&
-                  suggestions.subtitles[idx % suggestions.subtitles.length]) ||
-                'A COLLECTION OF MEMORIES';
-              const isSelected = selectedTitleIdx === idx;
-              return (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                 <button
-                  key={idx}
                   type="button"
-                  className={`studio-title-card ${isSelected ? 'selected' : ''}`}
-                  onClick={() => handlePickSuggestedCard(idx)}
+                  className="btn btn-secondary"
+                  style={{ padding: '0.45rem 0.95rem', fontSize: '0.82rem' }}
+                  onClick={() => {
+                    setIsPhotoModalOpen(false);
+                    triggerFilePicker();
+                  }}
                 >
-                  <div className="studio-title-card-top">
-                    <Type size={14} strokeWidth={1.75} color="var(--px-brand-iris)" />
-                    {isSelected && (
-                      <span className="studio-card-check">
-                        <Check size={12} strokeWidth={2.5} />
-                      </span>
+                  <Plus size={15} />
+                  <span>Replace / Add Batch</span>
+                </button>
+                <button
+                  type="button"
+                  className="mx-header-close-btn"
+                  onClick={() => setIsPhotoModalOpen(false)}
+                  aria-label="Close photo manager"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            <div className="mx-modal-body">
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))',
+                  gap: '0.65rem'
+                }}
+              >
+                {reconciledPhotos.map((item) => (
+                  <div
+                    key={item.photo_id}
+                    className={`curation-tile curation-tile-${item.status}`}
+                    style={{ width: '100%', height: '96px', borderRadius: '10px' }}
+                    title={item.status === 'rejected' ? item.reject_reason || 'filtered' : item.filename}
+                  >
+                    <PhotoFrame
+                      src={item.url}
+                      aspectRatio={1}
+                      dominantColors={item.dominant_colors}
+                      alt={item.filename}
+                      style={{ width: '100%', height: '100%', borderRadius: '10px' }}
+                    />
+                    {item.status === 'rejected' && (
+                      <span className="curation-reject-tag">{item.reject_reason || 'filtered'}</span>
                     )}
                   </div>
-                  <div className="studio-title-card-main">{title}</div>
-                  <div className="studio-title-card-sub">{sub}</div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Custom Title & Subtitle Inline Fields */}
-        <div className="studio-custom-title-row">
-          <div className="studio-input-group">
-            <label>
-              <Edit3 size={13} strokeWidth={1.75} />
-              <span>Custom Cover Title</span>
-            </label>
-            <input
-              type="text"
-              className="studio-input"
-              value={customTitle}
-              onChange={handleCustomTitleInput}
-              placeholder="Enter custom cover title (optional)..."
-              disabled={isLoading}
-            />
-          </div>
-          <div className="studio-input-group">
-            <label>
-              <Type size={13} strokeWidth={1.75} />
-              <span>Cover Subtitle</span>
-            </label>
-            <input
-              type="text"
-              className="studio-input"
-              value={customSubtitle}
-              onChange={handleCustomSubtitleInput}
-              placeholder="e.g., AUTUMN 2026 • ARCHIVE EDITION"
-              disabled={isLoading}
-            />
-          </div>
-        </div>
-      </section>
-
-      {/* Stage 3: Layout Content Mode */}
-      <section className="studio-section">
-        <div className="studio-section-header">
-          <span className="studio-stage-Index">03</span>
-          <div>
-            <h3>Inner Spread Layout Mode</h3>
-            <p>Choose whether inner pages include editorial story captions or pure photography.</p>
-          </div>
-        </div>
-
-        <div className="studio-mode-grid">
-          <button
-            type="button"
-            className={`studio-mode-card ${includeText ? 'selected' : ''}`}
-            onClick={() => setIncludeText(true)}
-            disabled={isLoading}
-          >
-            <div className="studio-mode-icon">
-              <BookOpen size={18} strokeWidth={1.75} />
-            </div>
-            <div className="studio-mode-body">
-              <div className="studio-mode-title">
-                <span>Include Narrative Captions</span>
-                {includeText && <Check size={15} strokeWidth={2.25} color="var(--px-brand-iris)" />}
+                ))}
               </div>
-              <p>
-                Pairs chapter openers and curated story captions alongside your photographs.
-              </p>
             </div>
-          </button>
-
-          <button
-            type="button"
-            className={`studio-mode-card ${!includeText ? 'selected' : ''}`}
-            onClick={() => setIncludeText(false)}
-            disabled={isLoading}
-          >
-            <div className="studio-mode-icon">
-              <Image size={18} strokeWidth={1.75} />
-            </div>
-            <div className="studio-mode-body">
-              <div className="studio-mode-title">
-                <span>Photo-Only Layouts (No Text)</span>
-                {!includeText && <Check size={15} strokeWidth={2.25} color="var(--px-brand-iris)" />}
-              </div>
-              <p>
-                Allocates 100% of every inner spread exclusively to photography with zero text slots.
-              </p>
-            </div>
-          </button>
-        </div>
-      </section>
-
-      {/* Stage 4: Summary Review & Launch Action */}
-      <section className="studio-launch-bar">
-        <div className="studio-summary-meta">
-          <div className="studio-summary-item">
-            <span className="studio-summary-label">Cover Jacket</span>
-            <span className="studio-summary-value">{displayTitlePreview}</span>
-          </div>
-          <div className="studio-summary-divider" />
-          <div className="studio-summary-item">
-            <span className="studio-summary-label">Subtitle</span>
-            <span className="studio-summary-value">{displaySubtitlePreview}</span>
-          </div>
-          <div className="studio-summary-divider" />
-          <div className="studio-summary-item">
-            <span className="studio-summary-label">Inner Spreads</span>
-            <span className="studio-summary-badge">
-              {includeText ? 'Narrative Captions' : 'Photo-Only (Zero Text)'}
-            </span>
           </div>
         </div>
-
-        <button
-          type="button"
-          className="btn btn-primary studio-launch-btn"
-          onClick={handleLaunchGeneration}
-          disabled={isLoading || isWaitingForIngest}
-        >
-          {isWaitingForIngest ? (
-            <>
-              <RefreshCw size={16} strokeWidth={1.75} className="animate-spin" />
-              <span>Waiting for Curation...</span>
-            </>
-          ) : (
-            <>
-              <Sparkles size={16} strokeWidth={1.75} />
-              <span>Generate Photobook Variations</span>
-              <ArrowRight size={16} strokeWidth={1.75} />
-            </>
-          )}
-        </button>
-      </section>
+      )}
     </div>
   );
 }

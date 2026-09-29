@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { ChevronDown, Check, Shuffle, Loader2 } from 'lucide-react';
+import { ChevronDown, Check, Shuffle, Loader2, Sparkles, Heart } from 'lucide-react';
 import PhotoFrame from './PhotoFrame';
 
 /**
@@ -119,7 +119,21 @@ export default function BookCarousel3D({
   return (
     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       {!isSkeleton && (
-        <h2 className="preview-title">Choose Your Album Variation (3 Saved Styles)</h2>
+        <div style={{ textAlign: 'center', marginBottom: '1rem' }}>
+          <span
+            className="mx-ai-badge"
+            style={{ marginBottom: '0.55rem' }}
+          >
+            <Sparkles size={12} strokeWidth={2.2} />
+            Story Mode Drafts
+          </span>
+          <h2 className="preview-title" style={{ marginBottom: '0.35rem' }}>
+            We created 3 versions of your story
+          </h2>
+          <p style={{ color: 'var(--px-text-secondary)', fontSize: '0.94rem', maxWidth: '540px', margin: '0 auto 0.85rem' }}>
+            Tap any hardcover edition to flip through its pages below, or shuffle for three fresh design directions.
+          </p>
+        </div>
       )}
 
       {/* Reshuffle Variations Action Bar */}
@@ -129,14 +143,14 @@ export default function BookCarousel3D({
           className="btn btn-secondary"
           onClick={onReshuffleVariations}
           disabled={isReshuffling}
-          style={{ marginBottom: '1rem', padding: '0.5rem 1.25rem', borderRadius: '20px', fontWeight: 600 }}
+          style={{ marginBottom: '1.25rem', padding: '0.55rem 1.35rem', borderRadius: '999px', fontWeight: 600 }}
         >
           {isReshuffling ? (
-            <Loader2 size={16} color="var(--px-brand-iris)" strokeWidth={1.75} className="animate-spin" />
+            <Loader2 size={16} color="var(--mx-brand-purple)" strokeWidth={2} className="animate-spin" />
           ) : (
-            <Shuffle size={16} color="var(--px-brand-iris)" strokeWidth={1.75} />
+            <Shuffle size={16} color="var(--mx-brand-purple)" strokeWidth={2} />
           )}
-          <span>{isReshuffling ? 'Reshuffling Variations...' : 'Reshuffle Palettes & Layouts (3 Variations)'}</span>
+          <span>{isReshuffling ? 'Refreshing 3 Editions...' : 'Shuffle 3 New Book Styles'}</span>
         </button>
       )}
 
@@ -148,32 +162,55 @@ export default function BookCarousel3D({
       >
         {variations.map((item, idx) => {
           const isHero = idx === activeIdx;
-          const label = item.variation_title || item.theme_name || `Variation ${idx + 1}`;
+          const label = item.variation_title || item.theme_name || `Edition ${idx + 1}`;
 
           return (
-            <div
-              key={item.id || idx}
-              ref={(el) => {
-                cardRefs.current[idx] = el;
-              }}
-              role="radio"
-              aria-checked={isHero}
-              aria-label={`${label} — ${item.cover_title || 'Photobook'}`}
-              tabIndex={isSkeleton ? -1 : isHero ? 0 : -1}
-              className={`carousel-card ${isHero ? 'hero' : ''}`}
-              onClick={() => !isSkeleton && !isReshuffling && setActiveIdx && setActiveIdx(idx)}
-              onKeyDown={(e) => handleKeyDown(e, idx)}
-              style={{
-                borderColor: isHero ? item.accent_color : 'transparent'
-              }}
-            >
-              {isHero && !isSkeleton && (
-                <div className="hero-check-badge">
-                  <Check size={18} />
-                </div>
-              )}
+            <div key={item.id || idx} className="mx-variation-col">
+              <div
+                ref={(el) => {
+                  cardRefs.current[idx] = el;
+                }}
+                role="radio"
+                aria-checked={isHero}
+                aria-label={`${label} — ${item.cover_title || 'Photobook'}`}
+                tabIndex={isSkeleton ? -1 : isHero ? 0 : -1}
+                className={`carousel-card ${isHero ? 'hero' : ''}`}
+                onClick={() => !isSkeleton && !isReshuffling && setActiveIdx && setActiveIdx(idx)}
+                onKeyDown={(e) => handleKeyDown(e, idx)}
+                style={{
+                  borderColor: isHero ? item.accent_color || 'var(--mx-brand-purple)' : 'transparent'
+                }}
+              >
+                {isHero && !isSkeleton && (
+                  <div className="hero-check-badge">
+                    <Check size={17} strokeWidth={2.5} />
+                  </div>
+                )}
 
-              <CoverArt item={item} />
+                <CoverArt item={item} />
+              </div>
+
+              {!isSkeleton && (
+                <button
+                  type="button"
+                  onClick={() => !isReshuffling && setActiveIdx && setActiveIdx(idx)}
+                  className={`mx-variation-caption ${isHero ? 'active' : ''}`}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: '0.25rem 0.6rem'
+                  }}
+                >
+                  <Heart
+                    size={14}
+                    strokeWidth={2.2}
+                    fill={isHero ? 'var(--mx-brand-purple)' : 'none'}
+                    color={isHero ? 'var(--mx-brand-purple)' : 'var(--px-text-muted)'}
+                  />
+                  <span>{label}</span>
+                </button>
+              )}
             </div>
           );
         })}
@@ -184,8 +221,8 @@ export default function BookCarousel3D({
           type="button"
           className="scroll-indicator"
           onClick={onScrollDown}
-          title="Scroll to double page spreads"
-          aria-label="Scroll to double page spreads"
+          title="Scroll to open layflat book preview"
+          aria-label="Scroll to open layflat book preview"
         >
           <ChevronDown size={28} />
         </button>

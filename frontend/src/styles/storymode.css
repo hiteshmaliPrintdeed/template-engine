@@ -1,43 +1,66 @@
-/* Pixovo Story Mode — Editorial Luxury Design System */
+/* Pixovo Story Mode — Mixbook Story Mode Design System */
 :root {
-  /* Canvas & Backgrounds */
-  --px-canvas-bg: #F8FAFC;
-  --px-canvas-warm: #FAF9F6;
-  --px-surface-card: #FFFFFF;
-  --px-surface-card-subtle: rgba(255, 255, 255, 0.92);
-  --px-surface-overlay: rgba(15, 23, 42, 0.6);
+  /* Mixbook Story Mode Authentic Palette */
+  --mx-brand-purple: #512dcb;
+  --mx-brand-purple-hover: #4b2bba;
+  --mx-brand-purple-pressed: #361b93;
+  --mx-deep-purple: #17012e;
+  --mx-periwinkle: #8678ff;
+  --mx-periwinkle-mid: #7c6df8;
+  --mx-periwinkle-dark: #7365e5;
+  --mx-periwinkle-soft: #e7e4ff;
+  --mx-periwinkle-subtle: #f3f1ff;
+  --mx-periwinkle-faint: #fafaff;
+  --mx-story-mid: #f7f7fb;
+  --mx-story-bottom: #e3defe;
+  --mx-cream-white: #f8f7f3;
+  --mx-cream-hover: #f3f2ec;
+  --mx-cream-pressed: #e4e3db;
+  --mx-story-pink: #f066b4;
+  --mx-story-magenta: #f81f9a;
+  --mx-story-peach: #fdd3ad;
+  --mx-story-coral: #fa8864;
+
+  /* Canvas & Backgrounds (Mapped to Mixbook Story Mode) */
+  --px-canvas-bg: #f7f7fb;
+  --px-canvas-warm: #f8f7f3;
+  --px-surface-card: #ffffff;
+  --px-surface-card-subtle: rgba(255, 255, 255, 0.94);
+  --px-surface-overlay: rgba(23, 1, 46, 0.55);
 
   /* Borders & Dividers */
-  --px-border-light: #E2E8F0;
-  --px-border-subtle: #F1F5F9;
-  --px-border-active: #6366F1;
+  --px-border-light: #e7e4ff;
+  --px-border-subtle: #f3f1ff;
+  --px-border-active: #512dcb;
 
   /* Typography Colors */
-  --px-text-primary: #0F172A;
-  --px-text-secondary: #475569;
-  --px-text-muted: #64748B;
-  --px-text-subtle: #94A3B8;
+  --px-text-primary: #17012e;
+  --px-text-secondary: #373737;
+  --px-text-muted: #6e6878;
+  --px-text-subtle: #94909e;
 
-  /* Primary Brand Accent (Precision Iris) */
-  --px-brand-iris: #6366F1;
-  --px-brand-iris-hover: #4F46E5;
-  --px-brand-iris-active: #4338CA;
-  --px-brand-iris-subtle: #EEF2FF;
-  --px-brand-iris-border: #C7D2FE;
+  /* Primary Brand Accent (Mixbook Purple & Periwinkle) */
+  --px-brand-iris: #512dcb;
+  --px-brand-iris-hover: #4b2bba;
+  --px-brand-iris-active: #361b93;
+  --px-brand-iris-subtle: #f3f1ff;
+  --px-brand-iris-border: #c3bbff;
 
   /* Status Colors */
-  --px-status-success-bg: #F0FDF4;
-  --px-status-success-text: #166534;
-  --px-status-success-border: #BBF7D0;
-  --px-status-warning-bg: #FFFBEB;
-  --px-status-warning-text: #92400E;
-  --px-status-warning-border: #FDE68A;
+  --px-status-success-bg: #f0fdf4;
+  --px-status-success-text: #168413;
+  --px-status-success-border: #bbf7d0;
+  --px-status-warning-bg: #fff9ef;
+  --px-status-warning-text: #856404;
+  --px-status-warning-border: #ffc13a;
+  --px-status-warn-text: #d97706;
+  --px-status-danger-text: #ff1f00;
 
   /* Layered Shadows */
-  --px-shadow-subtle: 0 1px 3px rgba(0, 0, 0, 0.04);
-  --px-shadow-card: 0 4px 20px -2px rgba(15, 23, 42, 0.06);
-  --px-shadow-hover: 0 12px 30px -4px rgba(15, 23, 42, 0.10);
-  --px-shadow-book: 0 20px 45px -10px rgba(15, 23, 42, 0.22);
+  --px-shadow-subtle: 0 2px 8px rgba(23, 1, 46, 0.05);
+  --px-shadow-card: 0 10px 32px -4px rgba(23, 1, 46, 0.07);
+  --px-shadow-hover: 0 16px 36px -6px rgba(81, 45, 203, 0.14);
+  --px-shadow-book: 0 22px 48px -12px rgba(23, 1, 46, 0.24), 0 4px 14px rgba(0, 0, 0, 0.08);
 
   /* Motion & Easing */
   --px-ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
@@ -51,8 +74,8 @@
 }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  background: linear-gradient(180deg, var(--px-canvas-warm) 0%, var(--px-canvas-bg) 100%);
+  font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: linear-gradient(180deg, #fafaff 0%, #f8f7f3 48%, #f3f1ff 100%);
   color: var(--px-text-primary);
   min-height: 100vh;
   overflow-x: hidden;
@@ -1597,6 +1620,709 @@ input:focus-visible,
 [role="radio"]:focus-visible {
   outline: 2px solid var(--px-brand-iris);
   outline-offset: 3px;
+}
+
+/* ============================================================================
+   MIXBOOK STORY MODE AUTHENTIC INTERFACE & UX
+   ============================================================================ */
+
+.mx-header-left,
+.mx-header-center,
+.mx-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.mx-close-circle-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid #e4e3db;
+  background: #f8f7f3;
+  color: var(--mx-deep-purple);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: var(--px-transition-smooth);
+}
+
+.mx-close-circle-btn:hover {
+  background: #f3f2ec;
+  transform: scale(1.04);
+}
+
+.mx-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-family: 'Outfit', 'Plus Jakarta Sans', sans-serif;
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: var(--mx-brand-purple);
+  letter-spacing: -0.03em;
+  user-select: none;
+}
+
+.mx-wordmark-pill {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 999px;
+  color: #ffffff;
+  background-color: var(--mx-periwinkle);
+  background-image:
+    radial-gradient(ellipse 55% 175% at 90% 55%, rgba(248, 31, 154, 0.85) 0%, rgba(248, 31, 154, 0) 68%),
+    radial-gradient(ellipse 42% 150% at 78% -5%, rgba(253, 211, 173, 0.8) 0%, rgba(253, 211, 173, 0) 62%);
+  letter-spacing: 0.02em;
+}
+
+/* Mixbook Story Mode Signature Button (.controls-button-story-mode) */
+.mx-btn-story-mode {
+  background-color: var(--mx-periwinkle);
+  background-image:
+    radial-gradient(ellipse 55% 175% at 90% 55%, rgba(248, 31, 154, 0.85) 0%, rgba(248, 31, 154, 0) 68%),
+    radial-gradient(ellipse 42% 150% at 78% -5%, rgba(253, 211, 173, 0.80) 0%, rgba(253, 211, 173, 0) 62%);
+  border-radius: 100px;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.98rem;
+  padding: 0.88rem 1.75rem;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  box-shadow: 0 10px 24px -6px rgba(115, 101, 229, 0.45);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, background-color 0.12s ease-out;
+}
+
+.mx-btn-story-mode:hover:not(:disabled) {
+  background-color: var(--mx-periwinkle-dark);
+  transform: translateY(-1px);
+  box-shadow: 0 14px 28px -6px rgba(115, 101, 229, 0.55);
+}
+
+.mx-btn-story-mode:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+/* Story Mode Conversational Viewport Shell */
+.mx-story-shell {
+  width: 100%;
+  max-width: 680px;
+  min-height: calc(100vh - 128px);
+  margin: 0 auto;
+  background: linear-gradient(
+    180deg,
+    #fcfbf9 0%,
+    #f8f7f3 58%,
+    #f3effe 84%,
+    #f6d5f0 94%,
+    #f5b8e2 100%
+  );
+  border-radius: 28px;
+  border: 1px solid rgba(195, 187, 255, 0.55);
+  box-shadow: 0 24px 60px -15px rgba(23, 1, 46, 0.10), 0 2px 10px rgba(23, 1, 46, 0.04);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+  position: relative;
+}
+
+.mx-story-scroll-body {
+  flex: 1;
+  padding: 2.25rem 2rem 1.5rem 2rem;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+/* Screen 1: Welcome to Story Mode ("What book are you creating today?") */
+.mx-welcome-hero {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 2.5rem 1rem 2rem 1rem;
+  animation: pxSlideFade 0.35s var(--px-ease-out-expo);
+}
+
+.mx-welcome-eyebrow {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #4a4458;
+  margin-bottom: 0.65rem;
+  letter-spacing: -0.01em;
+}
+
+.mx-welcome-headline {
+  font-family: 'Outfit', 'Plus Jakarta Sans', sans-serif;
+  font-size: clamp(2.1rem, 4.5vw, 2.85rem);
+  font-weight: 700;
+  color: #2b2638;
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+  max-width: 420px;
+}
+
+/* Visual Occasion Suggestion Cards (Above Input Dock) */
+.mx-occasion-dock-section {
+  padding: 0 1.5rem 0.85rem 1.5rem;
+}
+
+.mx-occasion-cards-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(185px, 1fr));
+  gap: 0.65rem;
+}
+
+.mx-occasion-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 0.75rem 0.55rem 0.55rem;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.92);
+  box-shadow: 0 4px 14px rgba(23, 1, 46, 0.05);
+  cursor: pointer;
+  text-align: left;
+  transition: transform 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+  font-family: inherit;
+}
+
+.mx-occasion-card:hover {
+  background: rgba(255, 255, 255, 0.96);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(81, 45, 203, 0.12);
+}
+
+.mx-occasion-thumb {
+  width: 46px;
+  height: 46px;
+  border-radius: 11px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+
+.mx-occasion-card-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #2b2638;
+  line-height: 1.25;
+}
+
+.mx-occasion-card-sub {
+  font-size: 0.72rem;
+  color: #6e6878;
+  margin-top: 2px;
+  line-height: 1.2;
+}
+
+/* Conversational Turn-by-Turn Thread (Screen 2 — phone_crop_3.png) */
+.mx-chat-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+  width: 100%;
+}
+
+.mx-user-row {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+  animation: pxSlideFade 0.25s var(--px-ease-out-expo);
+}
+
+.mx-user-bubble {
+  max-width: 82%;
+  padding: 0.72rem 1.1rem;
+  border-radius: 18px 18px 4px 18px;
+  background: #efede7;
+  color: #231f2e;
+  font-size: 0.94rem;
+  font-weight: 500;
+  line-height: 1.45;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.mx-ai-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-width: 92%;
+  color: #231f2e;
+  font-size: 0.96rem;
+  line-height: 1.52;
+  animation: pxSlideFade 0.3s var(--px-ease-out-expo);
+}
+
+.mx-ai-turn p {
+  color: #2b2638;
+  font-weight: 450;
+}
+
+.mx-ai-turn p.mx-ai-lead {
+  font-weight: 600;
+  color: #17012e;
+}
+
+.mx-quick-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.25rem;
+}
+
+.mx-quick-chip {
+  padding: 0.42rem 0.9rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid #dcd6f7;
+  color: #362e52;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.16s ease;
+  font-family: inherit;
+}
+
+.mx-quick-chip:hover {
+  background: #ffffff;
+  border-color: var(--mx-periwinkle);
+  color: var(--mx-brand-purple);
+  transform: translateY(-1px);
+}
+
+.mx-quick-chip.active {
+  background: var(--mx-brand-purple);
+  border-color: var(--mx-brand-purple);
+  color: #ffffff;
+}
+
+/* Inline Photo Upload Strip inside Chat Stream (phone_crop_3.png) */
+.mx-inline-upload-card {
+  margin-top: 0.35rem;
+  padding: 1rem 1.15rem;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(195, 187, 255, 0.7);
+  box-shadow: 0 6px 20px rgba(23, 1, 46, 0.05);
+}
+
+.mx-inline-dropzone {
+  border: 1.5px dashed #b6aeff;
+  border-radius: 16px;
+  padding: 1.5rem 1.25rem;
+  text-align: center;
+  background: rgba(250, 250, 255, 0.75);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mx-inline-dropzone:hover,
+.mx-inline-dropzone.active {
+  background: #f3f1ff;
+  border-color: var(--mx-brand-purple);
+}
+
+.mx-inline-strip-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: #37324a;
+  margin-bottom: 0.55rem;
+}
+
+.mx-inline-Photo-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  overflow-x: auto;
+  padding-bottom: 0.35rem;
+  scrollbar-width: thin;
+}
+
+.mx-inline-photo-thumb {
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+  position: relative;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+}
+
+.mx-inline-photo-shimmer {
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  background: linear-gradient(
+    135deg,
+    rgba(231, 228, 255, 0.9) 0%,
+    rgba(240, 102, 180, 0.38) 50%,
+    rgba(253, 211, 173, 0.65) 100%
+  );
+  background-size: 200% 200%;
+  animation: pxShimmer 1.5s infinite linear;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+}
+
+/* Inline Preferences Card in Chat Stream */
+.mx-prefs-panel {
+  margin-top: 0.5rem;
+  padding: 1.15rem;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(195, 187, 255, 0.75);
+  box-shadow: 0 8px 24px rgba(23, 1, 46, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* Bottom Aurora Input Dock (phone_crop_3.png & phone_crop_4.png) */
+.mx-bottom-dock {
+  padding: 0.85rem 1.35rem 1.25rem 1.35rem;
+  background: linear-gradient(
+    180deg,
+    rgba(243, 239, 254, 0) 0%,
+    rgba(227, 222, 254, 0.65) 35%,
+    rgba(240, 102, 180, 0.32) 100%
+  );
+}
+
+.mx-input-pill-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #ffffff;
+  border-radius: 999px;
+  padding: 0.38rem 0.45rem 0.38rem 1.15rem;
+  box-shadow: 0 8px 24px rgba(23, 1, 46, 0.10), inset 0 0 0 1px rgba(213, 219, 222, 0.65);
+  min-height: 52px;
+}
+
+.mx-input-pill-bar:focus-within {
+  box-shadow: 0 8px 26px rgba(81, 45, 203, 0.18), inset 0 0 0 2px var(--mx-periwinkle);
+}
+
+.mx-input-field {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 0.95rem;
+  color: #17012e;
+  outline: none;
+  font-family: inherit;
+  min-width: 0;
+}
+
+.mx-input-field::placeholder {
+  color: #94909e;
+}
+
+.mx-send-circle-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: none;
+  background: var(--mx-periwinkle-dark);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.mx-send-circle-btn:hover:not(:disabled) {
+  background: var(--mx-brand-purple);
+  transform: scale(1.05);
+}
+
+.mx-send-circle-btn:disabled {
+  background: #d9d9d9;
+  cursor: not-allowed;
+}
+
+.mx-photos-circle-btn {
+  height: 38px;
+  padding: 0 0.75rem;
+  border-radius: 999px;
+  border: 1px solid #e4e3db;
+  background: #f8f7f3;
+  color: #2b2638;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.38rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.mx-photos-circle-btn:hover {
+  background: #f3f2ec;
+  border-color: var(--mx-periwinkle);
+  color: var(--mx-brand-purple);
+}
+
+/* Photos Manager Modal Drawer */
+.mx-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 950;
+  background: rgba(23, 1, 46, 0.48);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  animation: pxSlideFade 0.2s ease-out;
+}
+
+.mx-modal-card {
+  width: 100%;
+  max-width: 680px;
+  max-height: 84vh;
+  background: #ffffff;
+  border-radius: 24px;
+  border: 1px solid var(--px-border-light);
+  box-shadow: 0 24px 60px rgba(23, 1, 46, 0.24);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.mx-modal-header {
+  padding: 1.15rem 1.5rem;
+  border-bottom: 1px solid var(--px-border-light);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mx-modal-body {
+  padding: 1.25rem 1.5rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* Mixbook 3-Edition Book Covers (mixbook_tomsguide_1.png) */
+.mx-carousel-item-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.carousel-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 18px;
+  background: linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0.16) 0%,
+    rgba(255, 255, 255, 0.45) 28%,
+    rgba(0, 0, 0, 0.10) 58%,
+    rgba(255, 255, 255, 0.18) 78%,
+    rgba(0, 0, 0, 0) 100%
+  );
+  z-index: 25;
+  pointer-events: none;
+}
+
+.mx-cover-caption {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #373737;
+  cursor: pointer;
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  transition: all 0.18s ease;
+}
+
+.mx-cover-caption.active {
+  color: var(--mx-brand-purple);
+  background: var(--mx-periwinkle-subtle);
+}
+
+/* Mixbook Layflat Open Book Viewer (mixbook_tomsguide_2.png) */
+.mx-studio-toolbar {
+  width: 100%;
+  max-width: 840px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+  background: #ffffff;
+  padding: 0.65rem 1rem;
+  border-radius: 999px;
+  border: 1px solid var(--px-border-light);
+  box-shadow: var(--px-shadow-subtle);
+}
+
+.mx-view-segmented {
+  display: inline-flex;
+  align-items: center;
+  background: #f8f7f3;
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid #e4e3db;
+}
+
+.mx-view-seg-btn {
+  padding: 0.42rem 1rem;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: #6e6878;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: inherit;
+  transition: all 0.16s ease;
+}
+
+.mx-view-seg-btn.active {
+  background: var(--mx-brand-purple);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(81, 45, 203, 0.25);
+}
+
+.mx-layflat-book-frame {
+  width: 100%;
+  max-width: 860px;
+  padding: 6px 12px;
+  background: linear-gradient(90deg, #e5e4e0 0%, #ffffff 1.5%, #ffffff 98.5%, #e5e4e0 100%);
+  border-radius: 6px;
+  box-shadow:
+    -6px 0 0 -2px #f3f2ee,
+    6px 0 0 -2px #f3f2ee,
+    -11px 0 0 -4px #e2e0d8,
+    11px 0 0 -4px #e2e0d8,
+    0 28px 50px -12px rgba(23, 1, 46, 0.24),
+    0 6px 16px rgba(0, 0, 0, 0.08);
+  position: relative;
+}
+
+.mx-flip-controls-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  margin-top: 1.1rem;
+}
+
+.mx-flip-arrow-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--px-border-light);
+  background: #ffffff;
+  color: var(--mx-deep-purple);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--px-shadow-subtle);
+  transition: all 0.16s ease;
+}
+
+.mx-flip-arrow-btn:hover:not(:disabled) {
+  border-color: var(--mx-periwinkle);
+  color: var(--mx-brand-purple);
+  transform: scale(1.06);
+}
+
+.mx-flip-arrow-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.mx-spread-scrubber {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  overflow-x: auto;
+  max-width: 100%;
+  padding: 0.5rem 0.25rem;
+  margin-top: 0.5rem;
+}
+
+.mx-scrubber-pill {
+  padding: 0.32rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--px-border-light);
+  background: #ffffff;
+  color: #6e6878;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.mx-scrubber-pill.active {
+  background: var(--mx-brand-purple);
+  border-color: var(--mx-brand-purple);
+  color: #ffffff;
+}
+
+@media (max-width: 640px) {
+  .mx-story-shell {
+    min-height: calc(100vh - 84px);
+    border-radius: 20px;
+  }
+  .mx-story-scroll-body {
+    padding: 1.5rem 1.15rem 1rem 1.15rem;
+  }
+  .mx-occasion-cards-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .studio-title-grid,
+  .studio-custom-title-row,
+  .studio-mode-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

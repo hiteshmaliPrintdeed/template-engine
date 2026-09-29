@@ -81,6 +81,7 @@ function AppContent() {
   const [variationSeedOffset, setVariationSeedOffset] = useState(1);
   const [isExportingPDF, setIsExportingPDF] = useState(false);
   const [syncStatus, setSyncStatus] = useState({ synced: 0, total: 0 });
+  const [storySessionKey, setStorySessionKey] = useState(0);
 
   const [sessionId, setSessionId] = useState(() => {
     try {
@@ -940,6 +941,7 @@ function AppContent() {
     setIsLoading(false);
     setIsExportingPDF(false);
     setIsReshufflingVars(false);
+    setStorySessionKey((k) => k + 1);
     setStep('upload');
   };
 
@@ -960,8 +962,7 @@ function AppContent() {
     return 'pending';
   };
 
-  const visibleCurationTiles = reconciledPhotos.slice(0, MAX_CURATION_STRIP_TILES);
-  const curationOverflow = Math.max(0, reconciledPhotos.length - MAX_CURATION_STRIP_TILES);
+  const isStoryConversationalStep = !capacityState && (step === 'upload' || step === 'chat');
 
   return (
     <div className="app-container">
@@ -970,10 +971,10 @@ function AppContent() {
         isExporting={isExportingPDF}
         syncStatus={syncStatus}
         onClearSession={handleClearSession}
-        canClearSession={step !== 'upload' || uploadedCount > 0}
+        canClearSession={step !== 'upload' || uploadedCount > 0 || Boolean(userPrompt.trim())}
       />
 
-      <main className="main-wrapper">
+      <main className={`main-wrapper ${isStoryConversationalStep ? 'main-wrapper--story' : ''}`.trim()}>
         {capacityState && (
           <CapacityGate
             position={capacityState.position}
@@ -1066,78 +1067,15 @@ function AppContent() {
           </div>
         )}
 
-        {!capacityState && step === 'upload' && (
-          <div key="step-upload" className="step-enter-active" style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
-            <PhotoUploader
-              onPhotosUploaded={handlePhotosUploaded}
-              isUploading={isLoading}
-            />
-          </div>
-        )}
-
-        {!capacityState && step === 'chat' && (
-          <div key="step-chat" className="step-enter-active" style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.25rem' }}>
-            {reconciledPhotos.length > 0 && (
-              <div className="curation-strip-card">
-                <div className="curation-strip-header">
-                  <div className="curation-strip-status">
-                    <span className="curation-strip-title">
-                      {isPhotoUploadComplete
-                        ? `Curation complete — ${ingestProgress.survived || uploadedPhotos.length} of ${uploadedCount || reconciledPhotos.length} kept`
-                        : `Uploading photos — ${ingestProgress.done} of ${Math.max(1, ingestProgress.total)} batches`}
-                    </span>
-                    <span className="curation-strip-subtitle">
-                      {`Analysing quality — ${ingestProgress.received || 0} of ${uploadedCount || reconciledPhotos.length} · ${ingestProgress.survived || uploadedPhotos.length} kept`}
-                    </span>
-                  </div>
-                  <span className="curation-strip-badge">
-                    {isPhotoUploadComplete ? 'Ready' : `${Math.round((ingestProgress.done / Math.max(1, ingestProgress.total)) * 100)}%`}
-                  </span>
-                </div>
-
-                {!isPhotoUploadComplete && ingestProgress.total > 0 && (
-                  <div className="curation-dual-bars">
-                    <div className="curation-bar-track">
-                      <div
-                        className="curation-bar-fill"
-                        style={{ width: `${Math.round((ingestProgress.done / Math.max(1, ingestProgress.total)) * 100)}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                <div className="curation-strip-grid">
-                  {visibleCurationTiles.map((item) => (
-                    <div
-                      key={item.photo_id}
-                      className={`curation-tile curation-tile-${item.status}`}
-                      title={item.status === 'rejected' ? item.reject_reason || 'filtered' : item.filename}
-                    >
-                      <PhotoFrame
-                        src={item.url}
-                        aspectRatio={1}
-                        dominantColors={item.dominant_colors}
-                        alt={item.filename}
-                        style={{ width: '100%', height: '100%', borderRadius: '6px' }}
-                      />
-                      {item.status === 'rejected' && (
-                        <span className="curation-reject-tag">{item.reject_reason || 'filtered'}</span>
-                      )}
-                    </div>
-                  ))}
-                  {curationOverflow > 0 && (
-                    <div className="curation-tile curation-tile-more">
-                      +{curationOverflow}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
+        {isStoryConversationalStep && (
+          <div key={`story-mode-${storySessionKey}`} className="step-enter-active" style={{ width: '100%' }}>
             <AIChatbotWidget
               userPrompt={userPrompt}
               setUserPrompt={setUserPrompt}
               onGenerate={handleGenerateVariationsAsync}
+              onPhotosUploaded={handlePhotosUploaded}
+              reconciledPhotos={reconciledPhotos}
+              ingestProgress={ingestProgress}
               isPhotoUploadComplete={isPhotoUploadComplete}
               uploadedCount={uploadedCount}
               isLoading={isLoading}
