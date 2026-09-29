@@ -181,8 +181,9 @@ def test_failed_segment_is_filled_from_text_only(gemini):
 
 def test_segment_without_thumbnails_is_filled_from_text_only(gemini):
     photos = book_photos()
-    for p in photos[5:10]:          # segment 2 only
+    for p in photos[5:10]:          # segment 2 only: no key AND no thumbnail URL
         p.thumbnail_key = None
+        p.url = p.thumbnail_url = p.preview_url = "/uploads/originals/none.jpg"
     batch, _ = generate(photos, sid())
     assert seg_titles(batch) == ["Seen part 1", "Text part 2", "Seen part 3"]
     assert "vision segment=1" not in gemini.kinds("vision")
@@ -244,10 +245,118 @@ def test_changing_one_segment_recaptions_only_that_segment(gemini):
     "One two three four five six seven eight nine",   # too long
 ])
 def test_vision_captions_are_filtered(bad):
-    seg = validate_vision_segment({"title": "The day begins",
-                                   "captions": [bad, "Warm smiles all around", "Together under open skies"]})
+    seg = validate_vision_segment({"title": "Where it all began",
+                                   "captions": [bad, "Warm smiles all around", "Together in this moment"]})
     assert bad not in seg.captions
-    assert seg.captions == ["Warm smiles all around", "Together under open skies"]
+    assert seg.captions == ["Warm smiles all around", "Together in this moment"]
+
+
+@pytest.mark.parametrize("claim", [
+    "Enjoying the sunny afternoon",        # time of day + light
+    "Relaxing indoors on the couch",       # setting + object
+    "Dancing under the green trees",       # setting
+    "The bride and her mother",            # specific relationships
+    "Golden hour smiles all around",       # light
+])
+def test_unverifiable_claims_are_dropped(claim):
+    seg = validate_vision_segment({"title": "Where it all began",
+                                   "captions": [claim, "Warm smiles all around", "Together in this moment"]},
+                                  occasion="Family holiday")
+    assert claim not in seg.captions
+
+
+@pytest.mark.parametrize("line", [
+    "Smiles shared among friends", "Laughter filling the air", "Surrounded by good company",
+    "Everyone gathered close",
+])
+def test_people_lines_dropped_where_faces_are_rare(line):
+    raw = {"title": "Where it all began", "captions": [line, "Wonders along the way", "Every step tells a story"]}
+    # Face detection found people: the line is fine.
+    assert line in validate_vision_segment(raw, occasion="Trip", people="a few people").captions
+    # Mostly animals, landscapes or objects: the line would be wrong under most photos.
+    assert line not in validate_vision_segment(raw, occasion="Trip", people="few or no people").captions
+
+
+@pytest.mark.parametrize("line, seen", [
+    ("Celebrating surrounded by loved ones", "some"),   # found live in round 4
+    ("Views from the road", "all"),                    # literal setting, found live in round 4
+])
+def test_round_four_leaks_are_closed(line, seen):
+    raw = {"people_visible": seen, "title": "Where it all began",
+           "captions": [line, "Every step tells a story", "Onward we go together"]}
+    assert line not in validate_vision_segment(raw, occasion="Trip").captions
+
+
+@pytest.mark.parametrize("seen", ["none", "some"])
+def test_gemini_reporting_few_people_enables_the_people_filter(seen):
+    raw = {"people_visible": seen, "title": "Wonders along the way",
+           "captions": ["Smiles shared among friends", "Every step tells a story", "Deep into the wild"]}
+    assert "Smiles shared among friends" not in validate_vision_segment(raw, occasion="Trip").captions
+
+
+def test_gemini_reporting_all_people_keeps_people_lines():
+    raw = {"people_visible": "all", "title": "Where it all began",
+           "captions": ["Smiles shared among friends", "Every step tells a story"]}
+    assert "Smiles shared among friends" in validate_vision_segment(raw, occasion="Trip").captions
+
+
+@pytest.mark.parametrize("line", [
+    "Middle of the journey", "Passing through the middle chapters", "Turning another page",
+    "A book of memories",
+])
+def test_structure_words_are_dropped(line):
+    raw = {"title": "Where it all began", "captions": [line, "Every step tells a story", "Onward we go together"]}
+    assert line not in validate_vision_segment(raw, occasion="Trip").captions
+
+
+def test_people_fact_omitted_when_no_face_was_ever_detected():
+    # Face detection can silently fail to load and store 0 for everyone; "few
+    # or no people" would then be false for most books.
+    photos = book_photos()
+    for p in photos:
+        p.face_count = 0
+    facts = build_story_context("Trip", photos).segment_facts()
+    assert all("people" not in f for f in facts)
+    for p in photos[:5]:
+        p.face_count = 4
+    facts = build_story_context("Trip", photos).segment_facts()
+    assert facts[0]["people"] == "groups" and facts[1]["people"] == "few or no people"
+
+
+@pytest.mark.parametrize("line", ["Sweet focus on the hours", "Where our story began", "Sunday funday"])
+def test_filters_match_whole_words_only(line):
+    # Guards the word boundaries: without them "us" matches inside "focus",
+    # "sun" inside "Sunday", and good lines are rejected.
+    from app.engine.story_content import people_claims, unverifiable_claims
+
+    assert people_claims(line) == [] and unverifiable_claims(line, "Trip") == []
+
+
+def test_repeated_captions_are_removed_across_segments():
+    from app.engine.story_content import SegmentContent, dedupe_across_segments
+
+    segs = [
+        SegmentContent("Where it all began", ["A day to remember", "Every step tells a story", "Wonders along the way"]),
+        None,
+        SegmentContent("The journey continues", ["A day to remember", "Every step tells a story", "Onward together"]),
+    ]
+    dedupe_across_segments(segs)
+    assert segs[2].captions[0] == "Onward together"
+    assert len(segs[2].captions) >= 2, "a segment must keep its minimum even when that means a repeat"
+
+
+def test_occasion_text_grounds_its_own_words():
+    raw = {"title": "Beach days together", "captions": ["Toes in the beach sand", "Warm smiles all around"]}
+    assert validate_vision_segment(raw, occasion="Beach trip in Goa").title == "Beach days together"
+    with pytest.raises(StoryContentInvalid):
+        validate_vision_segment(raw, occasion="Family holiday")   # 'beach' not grounded here
+
+
+def test_trailing_full_stop_is_removed_but_ellipsis_kept():
+    seg = validate_vision_segment({"title": "Where it all began.",
+                                   "captions": ["Warm smiles all around.", "And so it begins..."]})
+    assert seg.title == "Where it all began"
+    assert seg.captions == ["Warm smiles all around", "And so it begins..."]
 
 
 def test_vision_segment_without_usable_title_is_rejected():

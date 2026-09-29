@@ -59,6 +59,31 @@ def _time_third(photo: Any, start: float, span: float) -> Optional[int]:
     return min(2, int((t - start) / span * 3))
 
 
+def thumbnail_storage_key(photo: Any) -> Optional[str]:
+    """
+    The photo's thumbnail storage key. Photos ingested before thumbnail_key was
+    recorded carry only a URL; every media URL is "/uploads/" + the storage key
+    (the /uploads route serves keys directly, in local and S3 mode alike), so the
+    key is recovered from it -- and validated like any other key, so a URL can
+    never become a path outside storage.
+    """
+    key = getattr(photo, "thumbnail_key", None)
+    if key:
+        return key
+    for attr in ("thumbnail_url", "url"):
+        url = getattr(photo, attr, None) or ""
+        if url.startswith("/uploads/thumbnails/"):
+            candidate = url[len("/uploads/"):]
+            try:
+                from app.storage.keys import validate_key
+
+                validate_key(candidate)
+            except ValueError:
+                return None
+            return candidate
+    return None
+
+
 def _candidates(photos: Sequence[Any], k: int) -> List[Any]:
     """Photos with a thumbnail, minus the blurriest third when enough remain.
 
@@ -66,7 +91,7 @@ def _candidates(photos: Sequence[Any], k: int) -> List[Any]:
     already rejected outright blurry photos; this only keeps Gemini from being
     shown the weakest of the survivors.
     """
-    usable = [p for p in photos if getattr(p, "thumbnail_key", None)]
+    usable = [p for p in photos if thumbnail_storage_key(p)]
     scored = [p for p in usable if getattr(p, "blur_score", None) is not None]
     if len(scored) >= 3 * k:
         cutoff = sorted(float(p.blur_score) for p in scored)[len(scored) // 3]
@@ -139,7 +164,7 @@ def select_representatives(
 
 def representative_image_bytes(photo: Any) -> Optional[bytes]:
     """The photo's thumbnail as a <=384 px JPEG, or None if it cannot be read."""
-    key = getattr(photo, "thumbnail_key", None)
+    key = thumbnail_storage_key(photo)
     if not key:
         return None
     try:

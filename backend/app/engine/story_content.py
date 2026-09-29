@@ -100,7 +100,118 @@ def clean_text(value: Any) -> Optional[str]:
         return None
     text = " ".join(unicodedata.normalize("NFKC", value).split())
     text = text.strip(_QUOTES).strip()
+    # A caption is a line, not a sentence: a trailing full stop reads as an
+    # error on the page, and the model adds one inconsistently.
+    text = re.sub(r"(?<!\.)\.$", "", text).strip()
     return text or None
+
+
+# ---------------------------------------------------------------------------
+# Unverifiable claims
+#
+# A caption is written from at most a few photos -- or none -- but printed under
+# EVERY photo in its pool: book captions rotate across the whole book, segment
+# captions across the whole segment. So a caption must not assert anything a
+# photo it was never checked against could contradict: time of day, light,
+# weather, season, indoor/outdoor, a specific place or object, or a specific
+# relationship. Testing on real uploads found these in 1 of 4 lines ("Enjoying
+# the sunny afternoon" printed under night concert photos, "Relaxing indoors on
+# the couch" under tents). The prompts ask for this too; this is the check that
+# holds regardless of what the model does.
+#
+# Words the user's OWN occasion text contains are grounded and allowed:
+# "Beach trip in Goa" legitimately permits "beach".
+# ---------------------------------------------------------------------------
+
+_UNVERIFIABLE_TERMS = (
+    # time of day
+    "morning", "mornings", "noon", "midday", "afternoon", "afternoons", "evening", "evenings",
+    "night", "nights", "nighttime", "tonight", "dusk", "dawn", "twilight", "daybreak", "daytime",
+    "sunset", "sunsets", "sunrise", "sunrises",
+    # light
+    "sun", "suns", "sunny", "sunlit", "sunlight", "sunshine", "sunbeam", "sunbeams", "sunkissed",
+    "moon", "moonlit", "moonlight", "star", "stars", "starry", "starlight", "candlelight",
+    "light", "lights", "lit", "glow", "glowing", "glows", "golden", "shadow", "shadows", "shade",
+    # weather and season
+    "rain", "rainy", "snow", "snowy", "cloud", "clouds", "cloudy", "fog", "foggy", "mist", "misty",
+    "breeze", "breezy", "wind", "windy", "storm", "summer", "winter", "autumn", "monsoon",
+    # indoor / outdoor and settings
+    "indoor", "indoors", "outdoor", "outdoors", "outside", "inside", "sky", "skies", "sea", "ocean",
+    "beach", "shore", "waves", "garden", "gardens", "park", "grass", "field", "fields", "meadow",
+    "forest", "woods", "tree", "trees", "mountain", "mountains", "hill", "hills", "lake", "river",
+    "city", "street", "streets", "road", "roads", "plaza", "balcony", "waterfront", "room", "couch", "sofa", "bench",
+    "stage", "venue", "table", "kitchen", "home",
+    # specific relationships (the warm generic ones -- family, friends, loved
+    # ones, together -- are fine: they describe the book, not a person)
+    "bride", "groom", "husband", "wife", "mother", "father", "mom", "mum", "dad", "parents",
+    "grandma", "grandpa", "grandmother", "grandfather", "grandparents", "sister", "sisters",
+    "brother", "brothers", "siblings", "son", "daughter", "baby", "babies", "kid", "kids",
+    "child", "children", "boy", "boys", "girl", "girls",
+)
+_UNVERIFIABLE = re.compile(r"\b(" + "|".join(_UNVERIFIABLE_TERMS) + r")\b", re.IGNORECASE)
+_GOLDEN_HOUR = re.compile(r"\bgolden hour\b", re.IGNORECASE)
+
+
+def grounded_terms(occasion: Optional[str]) -> set:
+    """Lower-case words of the user's occasion text, singular and plural."""
+    words = set(re.findall(r"[a-z]+", normalize_prompt(occasion)))
+    return words | {w + "s" for w in words} | {w[:-1] for w in words if w.endswith("s")}
+
+
+NO_PEOPLE = "few or no people"
+
+
+def people_label(avg_faces_per_photo: float) -> str:
+    """Local face detection, averaged per photo, as the label the prompts use."""
+    if avg_faces_per_photo >= 3:
+        return "groups"
+    if avg_faces_per_photo >= 1:
+        return "a few people"
+    return NO_PEOPLE
+
+
+# Lines that are only true if people are in the photo. Under a segment whose
+# photos are mostly animals, landscapes or objects -- where local face
+# detection found few or no faces -- "Smiles shared among friends" is wrong for
+# most of the photos it will be printed under. Testing found exactly this on a
+# mixed segment of wildlife, art and one group selfie.
+_PEOPLE_WORDS = re.compile(
+    r"\b(smiles?|smiling|laugh|laughs|laughter|laughing|faces?|friends?|company|hugs?|hugging|"
+    r"embrace|cheers|gathered|gathering|crowd|guests?|everyone|loved ones|people)\b",
+    re.IGNORECASE,
+)
+
+
+def people_claims(text: str) -> List[str]:
+    return [m.group(1).lower() for m in _PEOPLE_WORDS.finditer(text or "")]
+
+
+def dedupe_across_segments(segments: List[Optional["SegmentContent"]]) -> None:
+    """
+    Remove captions an earlier segment already uses, in place. Segments are
+    written independently (in parallel, for vision), so without this one book
+    repeats "A day to remember" in several chapters. A segment keeps its
+    repeats only as far as needed to stay at MIN_SEGMENT_CAPTIONS.
+    """
+    seen: set = set()
+    for seg in segments:
+        if seg is None:
+            continue
+        fresh = [c for c in seg.captions if c.upper() not in seen]
+        if len(fresh) < MIN_SEGMENT_CAPTIONS:
+            fresh += [c for c in seg.captions if c not in fresh][: MIN_SEGMENT_CAPTIONS - len(fresh)]
+        seg.captions = fresh
+        seen.update(c.upper() for c in seg.captions)
+        seen.add(seg.title.upper())
+
+
+def unverifiable_claims(text: str, occasion: Optional[str] = None) -> List[str]:
+    """The claim words in text that the occasion does not itself ground."""
+    allowed = grounded_terms(occasion)
+    found = [m.group(1).lower() for m in _UNVERIFIABLE.finditer(text or "")]
+    if _GOLDEN_HOUR.search(text or "") and "golden" not in allowed:
+        found.append("golden hour")
+    return [w for w in found if w not in allowed]
 
 
 def is_printable(text: str) -> bool:
@@ -149,6 +260,29 @@ def valid_title(value: Any) -> Optional[str]:
     if text is None or not is_printable(text) or len(to_display(text)) > MAX_TITLE_CHARS:
         return None
     return text
+
+
+def grounded(validator, occasion: Optional[str], people: Optional[str] = None):
+    """
+    validator, plus: reject text making claims the occasion does not ground,
+    and -- where face detection found few or no people -- text that is only
+    true of photos with people in them.
+    """
+    allowed = grounded_terms(occasion)
+
+    def check(value: Any) -> Optional[str]:
+        text = validator(value)
+        if text is None or unverifiable_claims(text, occasion):
+            return None
+        if people == NO_PEOPLE and people_claims(text):
+            return None
+        # Lines about the medium or the book's own structure ("Middle of the
+        # journey", "Passing through the middle chapters") -- the model echoing
+        # the prompt's framing back. Testing produced several.
+        if any(m.group(1).lower() not in allowed for m in _META_WORDS.finditer(text)):
+            return None
+        return text
+    return check
 
 
 def clean_pool(values: Any, validator=valid_caption, limit: int = MAX_CAPTIONS) -> List[str]:
@@ -253,7 +387,7 @@ def _themes_for(category: str) -> List[str]:
 # Validation
 # ---------------------------------------------------------------------------
 
-def validate_book_content(raw: Any) -> BookContent:
+def validate_book_content(raw: Any, occasion: Optional[str] = None) -> BookContent:
     """
     Turn model output into BookContent, or raise StoryContentInvalid.
 
@@ -288,7 +422,8 @@ def validate_book_content(raw: Any) -> BookContent:
     for i, rv in enumerate(raw_vars[:VARIATION_COUNT]):
         if not isinstance(rv, dict):
             raise StoryContentInvalid(f"variation {i + 1} is not an object")
-        captions = clean_pool(rv.get("captions"))
+        # Book captions rotate across the whole book: nothing unverifiable.
+        captions = clean_pool(rv.get("captions"), grounded(valid_caption, occasion))
         if len(captions) < MIN_CAPTIONS:
             raise StoryContentInvalid(
                 f"variation {i + 1} has {len(captions)} usable captions, need {MIN_CAPTIONS}"
@@ -306,7 +441,13 @@ def validate_book_content(raw: Any) -> BookContent:
     return BookContent(category=category, titles=titles, subtitles=subtitles, variations=variations)
 
 
-def validate_chapter_content(raw: Any, signature: str, segment_count: int) -> ChapterContent:
+def validate_chapter_content(
+    raw: Any,
+    signature: str,
+    segment_count: int,
+    occasion: Optional[str] = None,
+    facts: Optional[List[Dict[str, Any]]] = None,
+) -> ChapterContent:
     """
     Turn model output into ChapterContent, or raise StoryContentInvalid.
 
@@ -331,8 +472,10 @@ def validate_chapter_content(raw: Any, signature: str, segment_count: int) -> Ch
         if entry is None:
             segments.append(None)
             continue
-        title = valid_caption(entry.get("title"))  # printed in the caption box
-        captions = clean_pool(entry.get("captions"), valid_caption, MAX_SEGMENT_CAPTIONS)
+        people = facts[idx].get("people") if facts and idx < len(facts) else None
+        check = grounded(valid_caption, occasion, people)
+        title = check(entry.get("title"))  # printed in the caption box
+        captions = clean_pool(entry.get("captions"), check, MAX_SEGMENT_CAPTIONS)
         if title and title.upper() in {c.upper() for c in captions}:
             captions = [c for c in captions if c.upper() != title.upper()]
         if title is None or len(captions) < MIN_SEGMENT_CAPTIONS:
@@ -342,6 +485,7 @@ def validate_chapter_content(raw: Any, signature: str, segment_count: int) -> Ch
 
     if not any(segments):
         raise StoryContentInvalid("no segment passed validation")
+    dedupe_across_segments(segments)
     return ChapterContent(signature=signature, segments=segments)
 
 
@@ -408,6 +552,12 @@ class StoryContext:
         relative to the first photo are correct either way.
         """
         first_start = next((c.start_epoch for c in self.chapters if c.start_epoch > 0), 0.0)
+        # A book in which not one photo has a detected face almost certainly
+        # never ran face detection (it can silently fail to load), rather than
+        # being a book with no people. Saying "few or no people" then would be
+        # false for most books -- testing found every stored photo at 0 faces,
+        # group selfies included -- so the fact is left out instead.
+        faces_known = any(c.avg_faces > 0 for c in self.chapters)
         facts = []
         for s_idx, members in enumerate(self.segments):
             chs = [self.chapters[i] for i in members]
@@ -424,8 +574,9 @@ class StoryContext:
                     fact["break_before_hours"] = round(head.gap_before_sec / 3600.0, 1)
                 if head.moved_before:
                     fact["new_location"] = True
-            faces = sum(c.avg_faces * c.photo_count for c in chs) / max(1, photos)
-            fact["people"] = "groups" if faces >= 3 else ("a few people" if faces >= 1 else "few or no people")
+            if faces_known:
+                faces = sum(c.avg_faces * c.photo_count for c in chs) / max(1, photos)
+                fact["people"] = people_label(faces)
             facts.append(fact)
         return facts
 
@@ -570,7 +721,8 @@ VISION_TITLE_MAX_WORDS = 6
 # Captions sit under the photos; naming the medium ("a photo of...") reads as a
 # description of the book rather than of the moment.
 _META_WORDS = re.compile(
-    r"\b(photos?|photographs?|images?|pictures?|pics?|shots?|snapshots?|captured?|capturing|camera|frames?)\b",
+    r"\b(photos?|photographs?|images?|pictures?|pics?|shots?|snapshots?|captured?|capturing|camera|frames?|"
+    r"chapters?|pages?|books?|albums?|photobooks?|middle)\b",
     re.IGNORECASE,
 )
 
@@ -593,12 +745,20 @@ def valid_vision_title(value: Any) -> Optional[str]:
     return text
 
 
-def validate_vision_segment(raw: Any) -> SegmentContent:
+def validate_vision_segment(
+    raw: Any, occasion: Optional[str] = None, people: Optional[str] = None
+) -> SegmentContent:
     """One segment's vision response -> SegmentContent, or StoryContentInvalid."""
     if not isinstance(raw, dict):
         raise StoryContentInvalid("response is not a JSON object")
-    title = valid_vision_title(raw.get("title"))
-    captions = clean_pool(raw.get("captions"), valid_vision_caption, MAX_SEGMENT_CAPTIONS)
+    # Gemini's own report of the photos it saw. Unlike local face counts it
+    # cannot silently be zero, so it is trusted to switch the people filter on:
+    # "some" (a mixed chapter) as much as "none", since a people line would be
+    # printed under the photos without people too.
+    if str(raw.get("people_visible", "")).strip().lower() in ("none", "some"):
+        people = NO_PEOPLE
+    title = grounded(valid_vision_title, occasion, people)(raw.get("title"))
+    captions = clean_pool(raw.get("captions"), grounded(valid_vision_caption, occasion, people), MAX_SEGMENT_CAPTIONS)
     if title:
         captions = [c for c in captions if c.upper() != title.upper()]
     if title is None:
