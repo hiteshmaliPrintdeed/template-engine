@@ -6,6 +6,8 @@ import AIChatbotWidget from './components/AIChatbotWidget';
 import BookCarousel3D from './components/BookCarousel3D';
 import SpreadViewer from './components/SpreadViewer';
 import PhotoFrame from './components/PhotoFrame';
+import CapacityGate from './components/CapacityGate';
+import { ToastProvider, useToast } from './components/Toast';
 import PixovoClientDownsampler from './utils/client_downsampler';
 import useJobProgress from './hooks/useJobProgress';
 import { saveOriginalBlob, getPendingBlobs, removeOriginalBlob, sweepStaleBlobs, clearAllBlobs } from './utils/indexedDB';
@@ -48,13 +50,15 @@ const MICRO_FACTS = [
 
 const MAX_CURATION_STRIP_TILES = 48;
 
-export default function App() {
+function AppContent() {
+  const toast = useToast();
   const [step, setStep] = useState('upload'); // 'upload' -> 'chat' -> 'generating' -> 'preview'
   const [uploadedPhotos, setUploadedPhotos] = useState([]);
-  const [localPreviews, setLocalPreviews] = useState([]); // [{ photo_id, filename, previewUrl, aspect_ratio }]
-  const [serverPhotos, setServerPhotos] = useState({});   // photo_id -> PhotoMeta | { rejected, reject_reason }
+  const [localPreviews, setLocalPreviews] = useState([]);
+  const [serverPhotos, setServerPhotos] = useState({});
   const [isPhotoUploadComplete, setIsPhotoUploadComplete] = useState(false);
   const [uploadedCount, setUploadedCount] = useState(0);
+  const [capacityState, setCapacityState] = useState(null); // { position, retryIn, attempt, uploadPackage }
   const [userPrompt, setUserPrompt] = useState('');
   const [studioPrefs, setStudioPrefs] = useState({
     custom_title: null,
@@ -77,7 +81,6 @@ export default function App() {
   const [isExportingPDF, setIsExportingPDF] = useState(false);
   const [syncStatus, setSyncStatus] = useState({ synced: 0, total: 0 });
 
-  // Stage 1.1: one stable session token for the whole upload
   const [sessionId, setSessionId] = useState(() => {
     try {
       return sessionStorage.getItem('pixovo_session_id');
@@ -107,6 +110,19 @@ export default function App() {
       else sessionStorage.removeItem('pixovo_session_id');
     } catch (_) {}
   };
+
+  // Stage 2.4 Task 7: Reflect live progress in document.title for backgrounded tabs
+  useEffect(() => {
+    if (step === 'generating') {
+      document.title = `Designing… ${displayProgress}% · Pixovo`;
+    } else if (step === 'chat' && !isPhotoUploadComplete && uploadedCount > 0) {
+      document.title = `Curating… ${ingestProgress.received}/${uploadedCount} · Pixovo`;
+    } else if (step === 'preview' && variations[activeVarIdx]) {
+      document.title = `${variations[activeVarIdx].cover_title || 'Album Preview'} · Pixovo`;
+    } else {
+      document.title = 'Pixovo — Editorial Photobook Studio';
+    }
+  }, [step, displayProgress, isPhotoUploadComplete, uploadedCount, ingestProgress.received, variations, activeVarIdx]);
 
   // Stage 2.3 Task 1: Reconcile optimistic local blob URLs with server PhotoMeta
   const reconciledPhotos = useMemo(() => {
@@ -202,7 +218,15 @@ export default function App() {
       if (vars.length > 0) prioritiseOriginalsForVariation(vars[0]);
     },
     onError: (job) => {
-      alert(`Generation failed: ${job?.message || 'Unknown error'}`);
+      toast.show({
+        title: 'We couldn\'t complete your album',
+        message: job?.message || 'An unexpected layout error occurred.',
+        tone: 'error',
+        action: {
+          label: 'Upload Again',
+          onClick: () => setStep('upload')
+        }
+      });
       setIsLoading(false);
       setJobStatus('failed');
       setStep('chat');
@@ -217,7 +241,7 @@ export default function App() {
     if (sseState.themes) setSkeletonThemes(sseState.themes);
   }, [currentJobId, sseState]);
 
-  // Elapsed timer + micro-facts ticker using setTimeout chains (zero leaked intervals)
+  // Elapsed timer + micro-facts ticker using setTimeout chains
   useEffect(() => {
     if (step !== 'generating') {
       setElapsedSeconds(0);
@@ -445,18 +469,30 @@ export default function App() {
     return 'filtered';
   };
 
-  const handlePhotosUploaded = async (uploadPackage) => {
+  const summarizeRejections = (reasonsList) => {
+    if (!reasonsList || reasonsList.length === 0) return 'quality thresholds not met';
+    const counts = {};
+    reasonsList.forEach((r) => {
+      counts[r] = (counts[r] || 0) + 1;
+    });
+    return Object.entries(counts)
+      .map(([reason, count]) => `${count} ${reason}`)
+      .join(', ');
+  };
+
+  const handlePhotosUploaded = async (uploadPackage, attemptNumber = 1) => {
     const { processedCount, processedPhotos, previewItems = [], downsampler, downsampleTimeMs } = uploadPackage;
     setUploadedCount(processedCount);
     setIsPhotoUploadComplete(false);
+    setCapacityState(null);
 
-    // Stage 2.3 Task 1 & 2: Render immediately from optimistic local blobs
-    localPreviewsRef.current = previewItems;
-    setLocalPreviews(previewItems);
-    setServerPhotos({});
-    setStep('chat');
+    if (attemptNumber === 1) {
+      localPreviewsRef.current = previewItems;
+      setLocalPreviews(previewItems);
+      setServerPhotos({});
+    }
 
-    if (downsampleTimeMs) {
+    if (downsampleTimeMs && attemptNumber === 1) {
       try {
         fetch('/api/client-metrics', {
           method: 'POST',
@@ -486,6 +522,21 @@ export default function App() {
         body: JSON.stringify({ expected_photo_count: processedCount })
       });
 
+      // Stage 2.4 Task 3: Render calm CapacityGate queue panel on 503 with auto-retry
+      if (sessionRes.status === 503) {
+        const body = await sessionRes.json().catch(() => ({}));
+        const detailObj = typeof body.detail === 'object' && body.detail !== null ? body.detail : body;
+        const queuePosition = detailObj.queue_position || 1;
+        const retryAfter = (detailObj.retry_after_seconds || 15) + Math.floor(Math.random() * 3);
+        setCapacityState({
+          position: queuePosition,
+          retryIn: retryAfter,
+          attempt: attemptNumber,
+          uploadPackage,
+        });
+        return;
+      }
+
       if (!sessionRes.ok) {
         const body = await sessionRes.json().catch(() => ({}));
         throw new Error(body.detail || `Could not open upload session (${sessionRes.status})`);
@@ -493,47 +544,77 @@ export default function App() {
 
       const { session_id, chunk_size } = await sessionRes.json();
       persistSessionId(session_id);
+      setStep('chat');
 
       const chunks = PixovoClientDownsampler.chunk(processedPhotos, chunk_size || 40);
       setIngestProgress({ done: 0, total: chunks.length, received: 0, survived: 0 });
 
       const allPhotos = [];
+      const allRejectReasons = [];
+
       for (let i = 0; i < chunks.length; i++) {
-        const payload = downsampler.buildChunkPayload(chunks[i], session_id, i, chunks.length);
-        const data = await uploadChunkWithRetry(payload);
+        try {
+          const payload = downsampler.buildChunkPayload(chunks[i], session_id, i, chunks.length);
+          const data = await uploadChunkWithRetry(payload);
 
-        const chunkSurvived = data.photos || [];
-        const chunkRejected = data.rejected_photos || [];
+          const chunkSurvived = data.photos || [];
+          const chunkRejected = data.rejected_photos || [];
 
-        allPhotos.push(...chunkSurvived);
-        uploadedPhotosRef.current = allPhotos.slice();
-        setUploadedPhotos(allPhotos.slice());
+          allPhotos.push(...chunkSurvived);
+          uploadedPhotosRef.current = allPhotos.slice();
+          setUploadedPhotos(allPhotos.slice());
 
-        // Reconcile per-photo kept & rejected states for the live curation strip
-        setServerPhotos((prev) => {
-          const next = { ...prev };
-          chunkSurvived.forEach((p) => {
-            next[p.id] = { ...p, rejected: false };
+          setServerPhotos((prev) => {
+            const next = { ...prev };
+            chunkSurvived.forEach((p) => {
+              next[p.id] = { ...p, rejected: false };
+            });
+            chunkRejected.forEach((r) => {
+              const reason = normalizeRejectReason(r);
+              allRejectReasons.push(reason);
+              const rid = r.photo_id || (r.filename ? r.filename.replace(/_thumb\.\w+$/, '') : null);
+              if (rid) {
+                next[rid] = {
+                  id: rid,
+                  rejected: true,
+                  reject_reason: reason,
+                };
+              }
+            });
+            return next;
           });
-          chunkRejected.forEach((r) => {
-            const rid = r.photo_id || (r.filename ? r.filename.replace(/_thumb\.\w+$/, '') : null);
-            if (rid) {
-              next[rid] = {
-                id: rid,
-                rejected: true,
-                reject_reason: normalizeRejectReason(r),
-              };
-            }
-          });
-          return next;
-        });
 
-        setIngestProgress({
-          done: i + 1,
-          total: chunks.length,
-          received: data.session_received ?? Math.min(processedCount, (i + 1) * (chunk_size || 40)),
-          survived: data.session_survived ?? allPhotos.length
+          setIngestProgress({
+            done: i + 1,
+            total: chunks.length,
+            received: data.session_received ?? Math.min(processedCount, (i + 1) * (chunk_size || 40)),
+            survived: data.session_survived ?? allPhotos.length
+          });
+        } catch (chunkErr) {
+          // Stage 2.4 Task 1 & 4: Non-blocking toast during chunked upload so remaining chunks continue
+          console.error(`[Ingest] Chunk ${i + 1}/${chunks.length} failed:`, chunkErr);
+          toast.show({
+            title: 'Connection interrupted',
+            message: `Batch ${i + 1} of ${chunks.length} could not be uploaded (${chunkErr.message}). Uploaded photos are safe.`,
+            tone: 'warning',
+          });
+        }
+      }
+
+      // Stage 2.4 Task 4: Actionable error when all photos were filtered out
+      if (allPhotos.length === 0) {
+        const summaryText = summarizeRejections(allRejectReasons);
+        toast.show({
+          title: 'All photos were filtered out',
+          message: `All ${processedCount} photos were rejected (${summaryText}). Review the dimmed tiles above or upload different photos.`,
+          tone: 'error',
+          action: {
+            label: 'Upload Different Photos',
+            onClick: () => setStep('upload')
+          }
         });
+        setIsPhotoUploadComplete(false);
+        return;
       }
 
       setIsPhotoUploadComplete(true);
@@ -547,13 +628,23 @@ export default function App() {
       streamOriginalsInBackground(survivorOrigMap, session_id);
     } catch (e) {
       console.error('[Phase 1 Ingestion] Upload failed:', e);
-      alert(`Ingestion error: ${e.message}`);
+      toast.show({
+        title: 'Upload session could not start',
+        message: e.message || 'Check your connection and try again.',
+        tone: 'error',
+        action: {
+          label: 'Retry Upload',
+          onClick: () => handlePhotosUploaded(uploadPackage, attemptNumber + 1)
+        }
+      });
       setStep('upload');
       setIsPhotoUploadComplete(false);
     }
   };
 
   const handleGenerateVariationsAsync = async (promptOverride, options = {}) => {
+    if (isLoading) return; // Prevent double-submit
+
     let photosToUse = uploadedPhotos.length > 0 ? uploadedPhotos : uploadedPhotosRef.current;
     if (photosToUse.length === 0 && uploadedCount > 0) {
       for (let i = 0; i < 40; i++) {
@@ -563,6 +654,19 @@ export default function App() {
         }
         await new Promise((r) => setTimeout(r, 200));
       }
+    }
+
+    if (photosToUse.length === 0) {
+      toast.show({
+        title: 'We couldn\'t find your photos',
+        message: 'No curated photos are available in this session.',
+        tone: 'error',
+        action: {
+          label: 'Upload Again',
+          onClick: () => setStep('upload')
+        }
+      });
+      return;
     }
 
     const promptToUse = promptOverride !== undefined ? promptOverride : userPrompt;
@@ -600,13 +704,31 @@ export default function App() {
         const job = await res.json();
         setCurrentJobId(job.job_id);
       } else {
-        alert('Failed to submit job');
+        const errBody = await res.json().catch(() => ({}));
+        toast.show({
+          title: 'Could not start album generation',
+          message: errBody.detail || `Server returned status ${res.status}.`,
+          tone: 'error',
+          action: {
+            label: 'Try Again',
+            onClick: () => handleGenerateVariationsAsync(promptToUse, nextPrefs)
+          }
+        });
         setIsLoading(false);
         setJobStatus('failed');
         setStep('chat');
       }
     } catch (e) {
       console.error('Generation error:', e);
+      toast.show({
+        title: 'Connection lost',
+        message: 'Could not reach the layout engine. Your uploaded photos are safe.',
+        tone: 'error',
+        action: {
+          label: 'Retry',
+          onClick: () => handleGenerateVariationsAsync(promptToUse, nextPrefs)
+        }
+      });
       setIsLoading(false);
       setJobStatus('failed');
       setStep('chat');
@@ -626,7 +748,7 @@ export default function App() {
   };
 
   const handleReshuffleVariations = async () => {
-    if (!currentJobId) return;
+    if (!currentJobId || isReshufflingVars) return;
     setIsReshufflingVars(true);
     const nextOffset = variationSeedOffset + 1;
     setVariationSeedOffset(nextOffset);
@@ -645,18 +767,40 @@ export default function App() {
       if (res.ok) {
         const result = await res.json();
         setVariations(result.variations || []);
+        toast.show({
+          title: 'Three new styles ready',
+          message: 'Palettes and spread layouts have been refreshed.',
+          tone: 'success',
+          duration: 3500
+        });
+      } else {
+        toast.show({
+          title: 'Could not reshuffle styles',
+          message: 'Please try again in a moment.',
+          tone: 'warning'
+        });
       }
     } catch (err) {
       console.error('Variations reshuffle error:', err);
+      toast.show({
+        title: 'Connection lost',
+        message: 'Could not reshuffle variations right now.',
+        tone: 'warning'
+      });
     } finally {
       setIsReshufflingVars(false);
     }
   };
 
-  const handleExportPDF = async () => {
+  const handleExportPDF = async (forcePreview = false) => {
+    if (isExportingPDF) return;
     const selectedVar = variations[activeVarIdx];
     if (!selectedVar) {
-      alert('No photobook variation selected for PDF export.');
+      toast.show({
+        title: 'No variation selected',
+        message: 'Choose one of the three album styles before exporting.',
+        tone: 'warning'
+      });
       return;
     }
 
@@ -671,21 +815,27 @@ export default function App() {
           page_height_mm: 200,
           bleed_mm: 3,
           dpi: 300,
-          session_id: sessionIdRef.current
+          session_id: sessionIdRef.current,
+          force_preview: Boolean(forcePreview)
         })
       });
 
       if (res.status === 409) {
         const body = await res.json().catch(() => ({}));
         const info = body.detail || {};
-        const pending = info.pending_count ?? '?';
-        const totalPlaced = info.total_count ?? '?';
+        const pending = info.pending_count ?? 0;
+        const totalPlaced = info.total_count ?? 0;
+        const readyCount = Math.max(0, totalPlaced - pending);
         prioritiseOriginalsForVariation(selectedVar);
-        alert(
-          `Print files are still uploading — ${totalPlaced - pending} of ${totalPlaced} ready.\n\n` +
-          `They are now being prioritised. Try the export again in a moment, ` +
-          `or use Preview Export for a low-resolution proof.`
-        );
+        toast.show({
+          title: 'Print files still uploading',
+          message: `${readyCount} of ${totalPlaced} high-resolution files ready. Prioritising your chosen album now.`,
+          tone: 'warning',
+          action: {
+            label: 'Export Low-Res Proof',
+            onClick: () => handleExportPDF(true)
+          }
+        });
         return;
       }
 
@@ -700,16 +850,35 @@ export default function App() {
           document.body.appendChild(link);
           link.click();
           document.body.removeChild(link);
-        } else {
-          alert('PDF compiled successfully!');
         }
+        toast.show({
+          title: 'Download ready',
+          message: `${data.filename || 'pixovo_print_300dpi.pdf'} compiled for print.`,
+          tone: 'success'
+        });
       } else {
-        const err = await res.json();
-        alert(`PDF Export Error: ${err.detail || 'Failed to compile PDF'}`);
+        const err = await res.json().catch(() => ({}));
+        toast.show({
+          title: 'PDF export could not complete',
+          message: err.detail || 'Failed to compile print PDF.',
+          tone: 'error',
+          action: {
+            label: 'Retry Export',
+            onClick: () => handleExportPDF(forcePreview)
+          }
+        });
       }
     } catch (e) {
       console.error('PDF Export Error:', e);
-      alert('PDF Export failed. Check backend log.');
+      toast.show({
+        title: 'Connection lost during export',
+        message: 'Could not download the PDF. Please try again.',
+        tone: 'error',
+        action: {
+          label: 'Retry Export',
+          onClick: () => handleExportPDF(forcePreview)
+        }
+      });
     } finally {
       setIsExportingPDF(false);
     }
@@ -721,7 +890,6 @@ export default function App() {
       return;
     }
 
-    // Revoke any remaining local preview URLs
     localPreviewsRef.current.forEach((lp) => {
       if (lp.previewUrl) URL.revokeObjectURL(lp.previewUrl);
     });
@@ -738,6 +906,7 @@ export default function App() {
     setUploadedPhotos([]);
     setLocalPreviews([]);
     setServerPhotos({});
+    setCapacityState(null);
     setUploadedCount(0);
     setIsPhotoUploadComplete(false);
     setIngestProgress({ done: 0, total: 0, received: 0, survived: 0 });
@@ -782,7 +951,7 @@ export default function App() {
   return (
     <div className="app-container">
       <ToolbarHeader
-        onExportPDF={step === 'preview' ? handleExportPDF : null}
+        onExportPDF={step === 'preview' ? () => handleExportPDF(false) : null}
         isExporting={isExportingPDF}
         syncStatus={syncStatus}
         onClearSession={handleClearSession}
@@ -790,7 +959,20 @@ export default function App() {
       />
 
       <main className="main-wrapper">
-        {step === 'generating' && (
+        {capacityState && (
+          <CapacityGate
+            position={capacityState.position}
+            retryIn={capacityState.retryIn}
+            attempt={capacityState.attempt}
+            onRetry={() => handlePhotosUploaded(capacityState.uploadPackage, capacityState.attempt + 1)}
+            onCancel={() => {
+              setCapacityState(null);
+              setStep('upload');
+            }}
+          />
+        )}
+
+        {!capacityState && step === 'generating' && (
           <div key="step-generating" className="step-enter-active" style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2rem' }}>
             <div className="step-card synthesis-loader-card">
               <div className="synthesis-top-row">
@@ -857,7 +1039,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Stage 2.3 Task 4: Skeleton covers paint immediately as soon as themes_ready arrives */}
             {skeletonThemes && skeletonThemes.length > 0 && (
               <div className="step-enter-active" style={{ width: '100%' }}>
                 <BookCarousel3D
@@ -870,7 +1051,7 @@ export default function App() {
           </div>
         )}
 
-        {step === 'upload' && (
+        {!capacityState && step === 'upload' && (
           <div key="step-upload" className="step-enter-active" style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
             <PhotoUploader
               onPhotosUploaded={handlePhotosUploaded}
@@ -879,9 +1060,8 @@ export default function App() {
           </div>
         )}
 
-        {step === 'chat' && (
+        {!capacityState && step === 'chat' && (
           <div key="step-chat" className="step-enter-active" style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.25rem' }}>
-            {/* Stage 2.2 Task 5 & Stage 2.3 Task 2: Keep photos visible with live curation state during ingest */}
             {reconciledPhotos.length > 0 && (
               <div className="curation-strip-card">
                 <div className="curation-strip-header">
@@ -951,7 +1131,7 @@ export default function App() {
           </div>
         )}
 
-        {step === 'preview' && (
+        {!capacityState && step === 'preview' && (
           <div key="step-preview" className="story-preview-container step-enter-active">
             <BookCarousel3D
               variations={variations}
@@ -973,5 +1153,13 @@ export default function App() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ToastProvider>
+      <AppContent />
+    </ToastProvider>
   );
 }

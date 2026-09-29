@@ -926,29 +926,47 @@ body {
   gap: 1.5rem;
   margin: 1.5rem 0 2.5rem 0;
   width: 100%;
-  max-width: 900px;
+  max-width: 980px;
   position: relative;
+  transition: opacity 160ms ease-out;
+}
+
+.carousel-stage.reshuffling {
+  opacity: 0.45;
+}
+
+.carousel-stage.reshuffling .carousel-card {
+  pointer-events: none;
 }
 
 .carousel-card {
-  width: 220px;
-  height: 250px;
+  width: 300px;
+  height: 340px;
   border-radius: 12px;
   background: var(--px-surface-card);
   box-shadow: var(--px-shadow-book);
   cursor: pointer;
-  transition: all 0.4s var(--px-ease-out-expo);
   position: relative;
   overflow: hidden;
-  opacity: 0.75;
-  transform: scale(0.85);
+  border: 2px solid transparent;
+  transform: translate3d(0, 0, 0) scale(0.86);
+  opacity: 0.55;
+  transition:
+    transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 320ms ease-out,
+    border-color 200ms ease-out;
+  backface-visibility: hidden;
+}
+
+.carousel-card:focus-visible {
+  outline: 2px solid var(--px-brand-iris);
+  outline-offset: 4px;
 }
 
 .carousel-card.hero {
-  width: 320px;
-  height: 360px;
+  transform: translate3d(0, 0, 0) scale(1);
   opacity: 1;
-  transform: scale(1);
+  will-change: transform;
   box-shadow: var(--px-shadow-book);
   z-index: 10;
   border: 2px solid var(--px-surface-card-subtle);
@@ -1377,6 +1395,210 @@ body {
   font-weight: 700;
 }
 
+/* ============================================================================
+   STAGE 2.4: INTERACTION POLISH — TOAST STACK, CAPACITY GATE & FOCUS RINGS
+   ============================================================================ */
+
+.uploader-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 1.15rem;
+  padding: 0.65rem 1rem;
+  border-radius: 10px;
+  background: var(--px-canvas-bg);
+  border: 1px solid var(--px-border-light);
+  color: var(--px-text-muted);
+  font-size: 0.82rem;
+}
+
+.toast-stack {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  max-width: 390px;
+  width: calc(100vw - 3rem);
+  pointer-events: none;
+}
+
+.px-toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  border-radius: 14px;
+  background: var(--px-surface-card);
+  border: 1px solid var(--px-border-light);
+  box-shadow: var(--px-shadow-card);
+  animation: pxSlideFade 220ms ease-out;
+}
+
+.px-toast-info {
+  border-left: 4px solid var(--px-brand-iris);
+}
+
+.px-toast-success {
+  border-left: 4px solid var(--px-status-success-text);
+}
+
+.px-toast-warning {
+  border-left: 4px solid var(--px-status-warn-text);
+}
+
+.px-toast-error {
+  border-left: 4px solid var(--px-status-danger-text);
+}
+
+.px-toast-icon {
+  margin-top: 1px;
+  flex-shrink: 0;
+  color: var(--px-brand-iris);
+}
+
+.px-toast-success .px-toast-icon {
+  color: var(--px-status-success-text);
+}
+
+.px-toast-warning .px-toast-icon {
+  color: var(--px-status-warn-text);
+}
+
+.px-toast-error .px-toast-icon {
+  color: var(--px-status-danger-text);
+}
+
+.px-toast-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.px-toast-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--px-text-primary);
+  margin-bottom: 0.18rem;
+}
+
+.px-toast-message {
+  font-size: 0.8rem;
+  color: var(--px-text-secondary);
+  line-height: 1.4;
+}
+
+.px-toast-action {
+  margin-top: 0.55rem;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.3rem 0.7rem;
+  border-radius: 8px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  background: var(--px-brand-iris-subtle);
+  color: var(--px-brand-iris-active);
+  border: 1px solid var(--px-brand-iris-border);
+  cursor: pointer;
+}
+
+.px-toast-close {
+  background: transparent;
+  border: none;
+  color: var(--px-text-muted);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 6px;
+}
+
+.px-toast-close:hover {
+  color: var(--px-text-primary);
+}
+
+.capacity-gate-card {
+  max-width: 520px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2.5rem 2rem;
+}
+
+.capacity-gate-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--px-brand-iris-subtle);
+  border: 1px solid var(--px-brand-iris-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1rem;
+}
+
+.capacity-gate-title {
+  font-family: 'Outfit', sans-serif;
+  font-size: 1.45rem;
+  font-weight: 700;
+  color: var(--px-text-primary);
+  margin-bottom: 0.45rem;
+}
+
+.capacity-gate-copy {
+  font-size: 0.9rem;
+  color: var(--px-text-secondary);
+  max-width: 360px;
+  line-height: 1.5;
+  margin-bottom: 1.35rem;
+}
+
+.capacity-gate-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.45rem 1rem;
+  border-radius: 999px;
+  background: var(--px-canvas-bg);
+  border: 1px solid var(--px-border-light);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--px-text-primary);
+  margin-bottom: 1.5rem;
+}
+
+.capacity-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.capacity-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--px-border-light);
+}
+
+.capacity-dot.filled {
+  background: var(--px-brand-iris);
+}
+
+.capacity-gate-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+button:focus-visible,
+input:focus-visible,
+[role="radio"]:focus-visible {
+  outline: 2px solid var(--px-brand-iris);
+  outline-offset: 3px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .step-enter,
   .step-enter-active,
@@ -1386,11 +1608,14 @@ body {
   .synthesis-pulse-ring,
   .synthesis-rotate-ring,
   .synthesis-fact-ticker,
+  .carousel-stage,
   .carousel-card,
+  .carousel-card.hero,
+  .px-toast,
   .scroll-indicator {
     transition: none !important;
     animation: none !important;
-    transform: none !important;
   }
 }
+
 

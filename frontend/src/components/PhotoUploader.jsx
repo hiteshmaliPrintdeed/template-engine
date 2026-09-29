@@ -1,15 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { UploadCloud, CheckCircle2, Loader2 } from 'lucide-react';
+import { UploadCloud, CheckCircle2, Loader2, Image as ImageIcon } from 'lucide-react';
 import PixovoClientDownsampler from '../utils/client_downsampler';
 import PhotoFrame from './PhotoFrame';
+import { useToast } from './Toast';
 
 const MAX_PREVIEW_TILES = 60;
 
 /**
- * Phase 1 & Stage 2.1/2.3 Ingestion Pipeline Component:
+ * Phase 1 & Stage 2.1/2.3/2.4 Ingestion Pipeline Component:
  * - OffscreenCanvas Web Worker pool downsampling (512px thumbnails) + EXIF/GPS extraction
  * - Bounded preview grid (capped at 60 tiles with +N more indicator)
- * - Hands local preview URLs to App.jsx for optimistic instant rendering during ingest
+ * - Non-blocking toast notifications instead of modal alert()
+ * - Explicit empty state before upload
  */
 export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
   const [dragActive, setDragActive] = useState(false);
@@ -17,6 +19,7 @@ export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStage, setProcessingStage] = useState(''); // 'downsampling' | 'ready' | 'error'
   const [progressStats, setProgressStats] = useState({ completed: 0, total: 0 });
+  const toast = useToast();
 
   // Stage 2.1 Task 5: Hoist downsampler instance into a ref so worker pool is reused
   // across renders and terminated cleanly on unmount.
@@ -41,7 +44,11 @@ export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
     );
 
     if (fileList.length === 0) {
-      alert('Please upload valid image files (JPG, PNG, WebP).');
+      toast.show({
+        title: 'Unsupported file format',
+        message: 'Please select valid image files (JPEG, PNG, or WebP).',
+        tone: 'warning'
+      });
       return;
     }
 
@@ -59,7 +66,7 @@ export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
       });
 
       if (!processedResults || processedResults.length === 0) {
-        throw new Error('No valid photos could be processed.');
+        throw new Error('None of the selected files could be decoded as images.');
       }
 
       const totalDownsampleTimeMs = performance.now() - downsampleStartTime;
@@ -97,7 +104,11 @@ export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
       console.error('[PhotoUploader] Downsampling error:', err);
       setProcessingStage('error');
       setIsProcessing(false);
-      alert(`Photo processing failed: ${err.message}`);
+      toast.show({
+        title: 'Photo processing failed',
+        message: err.message || 'Could not process the selected images. Please try another batch.',
+        tone: 'error'
+      });
     }
   };
 
@@ -212,6 +223,13 @@ export default function PhotoUploader({ onPhotosUploaded, isUploading }) {
           {isProcessing ? 'Downsampling...' : 'Select Photos'}
         </label>
       </div>
+
+      {localPhotos.length === 0 && !isProcessing && (
+        <div className="uploader-empty-state">
+          <ImageIcon size={16} strokeWidth={1.75} />
+          <span>No photos selected yet. Your originals stay on your device until curation completes.</span>
+        </div>
+      )}
 
       {localPhotos.length > 0 && (
         <div style={{ marginTop: '2rem' }}>

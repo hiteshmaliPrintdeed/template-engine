@@ -1,13 +1,10 @@
-import React from 'react';
-import { ChevronDown, Check, Shuffle } from 'lucide-react';
+import React, { useRef } from 'react';
+import { ChevronDown, Check, Shuffle, Loader2 } from 'lucide-react';
 import PhotoFrame from './PhotoFrame';
 
 /**
  * Renders a variation's cover from the photo list the backend supplied, or as a
  * themed skeleton cover (Stage 2.3 Task 4) before layout photos arrive.
- *
- * Uses PhotoFrame so every cover slot reserves exact dimensions and paints
- * a dominant-colour or theme-palette gradient with zero layout shift.
  */
 export function CoverArt({ item }) {
   const photos = item.cover_photos || [];
@@ -91,7 +88,33 @@ export default function BookCarousel3D({
   isReshuffling,
   isSkeleton = false
 }) {
+  const cardRefs = useRef([]);
+
   if (!variations || variations.length === 0) return null;
+
+  // Stage 2.4 Task 6: Roving tabIndex + arrow/enter/space keyboard navigation
+  const handleKeyDown = (e, idx) => {
+    if (isSkeleton || isReshuffling || !setActiveIdx) return;
+    const count = variations.length;
+    let nextIdx = null;
+
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      nextIdx = (idx + 1) % count;
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      nextIdx = (idx - 1 + count) % count;
+    } else if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      setActiveIdx(idx);
+      return;
+    }
+
+    if (nextIdx !== null) {
+      setActiveIdx(nextIdx);
+      cardRefs.current[nextIdx]?.focus();
+    }
+  };
 
   return (
     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -102,26 +125,44 @@ export default function BookCarousel3D({
       {/* Reshuffle Variations Action Bar */}
       {!isSkeleton && onReshuffleVariations && (
         <button
+          type="button"
           className="btn btn-secondary"
           onClick={onReshuffleVariations}
           disabled={isReshuffling}
           style={{ marginBottom: '1rem', padding: '0.5rem 1.25rem', borderRadius: '20px', fontWeight: 600 }}
         >
-          <Shuffle size={16} color="var(--px-brand-iris)" strokeWidth={1.75} />
+          {isReshuffling ? (
+            <Loader2 size={16} color="var(--px-brand-iris)" strokeWidth={1.75} className="animate-spin" />
+          ) : (
+            <Shuffle size={16} color="var(--px-brand-iris)" strokeWidth={1.75} />
+          )}
           <span>{isReshuffling ? 'Reshuffling Variations...' : 'Reshuffle Palettes & Layouts (3 Variations)'}</span>
         </button>
       )}
 
       {/* 3D Book Carousel Stage */}
-      <div className="carousel-stage">
+      <div
+        className={`carousel-stage ${isReshuffling ? 'reshuffling' : ''}`.trim()}
+        role="radiogroup"
+        aria-label="Album variations"
+      >
         {variations.map((item, idx) => {
           const isHero = idx === activeIdx;
+          const label = item.variation_title || item.theme_name || `Variation ${idx + 1}`;
 
           return (
             <div
               key={item.id || idx}
+              ref={(el) => {
+                cardRefs.current[idx] = el;
+              }}
+              role="radio"
+              aria-checked={isHero}
+              aria-label={`${label} — ${item.cover_title || 'Photobook'}`}
+              tabIndex={isSkeleton ? -1 : isHero ? 0 : -1}
               className={`carousel-card ${isHero ? 'hero' : ''}`}
-              onClick={() => setActiveIdx && setActiveIdx(idx)}
+              onClick={() => !isSkeleton && !isReshuffling && setActiveIdx && setActiveIdx(idx)}
+              onKeyDown={(e) => handleKeyDown(e, idx)}
               style={{
                 borderColor: isHero ? item.accent_color : 'transparent'
               }}
@@ -139,7 +180,13 @@ export default function BookCarousel3D({
       </div>
 
       {!isSkeleton && onScrollDown && (
-        <button className="scroll-indicator" onClick={onScrollDown} title="Scroll to double page spreads">
+        <button
+          type="button"
+          className="scroll-indicator"
+          onClick={onScrollDown}
+          title="Scroll to double page spreads"
+          aria-label="Scroll to double page spreads"
+        >
           <ChevronDown size={28} />
         </button>
       )}
