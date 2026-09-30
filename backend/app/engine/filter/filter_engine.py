@@ -15,10 +15,16 @@ import threading
 import math
 import time
 import base64
+# asdict and logger were both used below without being imported. Each NameError
+# was swallowed by a bare except: every photo WITH a face was recorded as having
+# none (detect_faces), and a colour-extraction hiccup rejected a good photo as
+# "Corrupt image: name 'logger' is not defined" (process_single_photo).
+from dataclasses import asdict
 from datetime import datetime
 from typing import List, Dict, Any, Tuple
 import cv2
 import numpy as np
+from loguru import logger
 from PIL import Image, ImageOps
 from sklearn.cluster import DBSCAN
 
@@ -110,6 +116,9 @@ class Phase1FilterEngine:
 
     def __init__(self):
         self.face_detector = FaceDetector(min_confidence=0.45) if FaceDetector else None
+        if self.face_detector is None:
+            logger.warning("[Filter] No face detector available: every photo will report 0 faces")
+        self.face_errors: Dict[str, int] = {}
         self.aligner = ImageOrientationAligner()
 
     def load_cv2_image_fast(self, filepath: str, max_dim: int = 800) -> Tuple[np.ndarray, Tuple[int, int]]:
@@ -392,7 +401,15 @@ class Phase1FilterEngine:
                 face_quality_score,
                 face_details
             )
-        except Exception:
+        except Exception as exc:
+            # Still degrade to "no faces" -- one bad image must not fail ingest --
+            # but never silently again: the missing-import bug hid here for every
+            # photo with a face. Logged once per engine per error type, counted
+            # always, so a regression is visible without flooding the log.
+            key = type(exc).__name__
+            self.face_errors[key] = self.face_errors.get(key, 0) + 1
+            if self.face_errors[key] == 1:
+                logger.warning(f"[Filter] Face detection failed ({key}: {exc}); treating photo as no faces")
             return 0, 0, 0.5, 0.5, 0.0, empty_details
 
     # -------------------------------------------------------------

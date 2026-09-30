@@ -38,6 +38,15 @@ from tests.fixtures.golden_story import _photo, photo_sets
 # Helpers
 # ---------------------------------------------------------------------------
 
+# Distinct words for fake lines. Formulaic fakes ("line 1", "line 2") share
+# almost every word, so the book-wide near-duplicate check (rightly) treats
+# them as one line; real captions differ in wording, and so must the fakes.
+WORDS = (
+    "alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo lima mike "
+    "november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu "
+    "gamma kappa sigma omega theta zeta iota lambda epsilon upsilon omicron rho tau chi psi"
+).split()
+
 def book_response(tag="Wedding", **overrides):
     """A well-formed book response in sentence case, distinct per variation."""
     resp = {
@@ -49,7 +58,7 @@ def book_response(tag="Wedding", **overrides):
                 "theme_name": theme,
                 "cover_title": f"{tag} cover {n}",
                 "cover_subtitle": f"Edition {n}",
-                "captions": [f"{tag} moment {n}.{k}" for k in range(1, 7)],
+                "captions": [f"{tag} moment {WORDS[(n - 1) * 6 + k - 1]}" for k in range(1, 7)],
             }
             for n, theme in ((1, "Warm"), (2, "Elegant"), (3, "Minimal"))
         ],
@@ -58,13 +67,13 @@ def book_response(tag="Wedding", **overrides):
     return resp
 
 
-def chapter_response(n_segments, tag="Part"):
+def chapter_response(n_segments, tag="Part", lines=40):
     return {
         "segments": [
             {
                 "segment_index": i,
                 "title": f"{tag} {i + 1} begins",
-                "captions": [f"{tag} {i + 1} line {k}" for k in range(1, 5)],
+                "captions": [f"{tag} {i + 1} {WORDS[k % len(WORDS)]}" for k in range(lines)],
             }
             for i in range(n_segments)
         ]
@@ -88,7 +97,11 @@ class FakeGemini:
         return self.chapters(prompt_text)
 
     def count(self, kind=None):
-        return len(self.calls) if kind is None else self.calls.count(kind)
+        # Text requests are labelled "chapters [0.0,1.0]" (the parts they cover).
+        return len(self.calls) if kind is None else sum(1 for k in self.calls if k.split(" ")[0] == kind)
+
+    def kinds(self):
+        return [k.split(" ")[0] for k in self.calls]
 
 
 @pytest.fixture(autouse=True)
@@ -144,7 +157,7 @@ def test_valid_book_is_accepted_and_kept_raw():
     assert book.category == "Celebration"
     assert [v.theme_name for v in book.variations] == ["Warm", "Elegant", "Minimal"]
     # Stored in the case Gemini wrote it; only to_display uppercases.
-    assert book.variations[0].captions[0] == "Wedding moment 1.1"
+    assert book.variations[0].captions[0] == "Wedding moment alpha"
 
 
 def test_book_trims_whitespace_and_quotes():
@@ -293,7 +306,7 @@ def test_call_budget_is_two_then_zero(gemini):
 
     story_ai.suggest_creative_titles("Wedding in Udaipur", 16, sid)
     story_ai.generate_story_theme_batch("Wedding in Udaipur", 16, sid, story_context=ctx)
-    assert gemini.calls == ["book", "chapters"]
+    assert gemini.kinds() == ["book", "chapters"]
 
     story_ai.suggest_creative_titles("Wedding in Udaipur", 16, sid)
     story_ai.generate_story_theme_batch("Wedding in Udaipur", 16, sid, story_context=ctx)
@@ -326,7 +339,7 @@ def test_invalid_response_falls_back_and_is_cached(gemini):
     gemini.book = lambda p: {"category": "Nonsense"}
     sid = new_sid()
     batch = story_ai.generate_story_theme_batch("Wedding in Udaipur", 16, sid)
-    assert batch["variations"][0]["captions"][0] == "THE JOURNEY BEGINS AT FIRST LIGHT"
+    assert batch["variations"][0]["captions"][0] == "THE STORY UNFOLDS HERE"
     story_ai.generate_story_theme_batch("Wedding in Udaipur", 16, sid)
     assert gemini.count("book") == 1, "a failed attempt must not be retried every request"
 
@@ -340,17 +353,19 @@ def test_failed_chapter_call_is_remembered(gemini):
     assert gemini.count("chapters") == 1
 
 
-def test_no_chapter_call_without_text_or_story_breaks(gemini):
+def test_chapter_calls_follow_the_text_setting_not_the_segment_count(gemini):
     gemini.chapters = lambda p: chapter_response(3)
     sid = new_sid()
     multi_ctx = build_story_context("Wedding", photo_sets()["multi"])
     story_ai.generate_story_theme_batch("Wedding", 16, sid, include_text=False, story_context=multi_ctx)
-    # Photos without capture times: no known story structure, one segment.
+    assert gemini.count("chapters") == 0, "a photo-only book needs no captions"
+    # Photos without capture times: no known story structure, one segment. It
+    # shows no title, but every spread still needs its own line.
     untimed = [_photo(f"u{i}", 0.0, 80.0, 1.5, 1) for i in range(30)]
     untimed_ctx = build_story_context("Wedding", untimed)
     assert len(untimed_ctx.segments) == 1
     story_ai.generate_story_theme_batch("Wedding", 30, sid, story_context=untimed_ctx)
-    assert gemini.count("chapters") == 0
+    assert gemini.count("chapters") == 1
 
 
 def test_chapter_switch_off(gemini, monkeypatch):
@@ -380,8 +395,11 @@ def test_many_chapters_are_grouped_into_bounded_segments():
     assert len(ctx.segments) == MAX_STORY_SEGMENTS
     flat = [c for seg in ctx.segments for c in seg]
     assert flat == list(range(60)), "segments must be contiguous and cover every chapter once"
-    prompt = story_ai._chapter_prompt("Long trip", "Travel", ctx.segment_facts())
-    assert len(prompt) < 6000, "prompt must stay bounded however many chapters there are"
+    facts = ctx.segment_facts()
+    requests = story_ai._line_requests(ctx, story_ai.TEXT_LINES_PER_REQUEST)
+    assert all(r["people_lines"] + r["neutral_lines"] <= story_ai.TEXT_LINES_PER_REQUEST for r in requests)
+    prompt = story_ai._chapter_prompt("Long trip", "Travel", facts, requests[:5])
+    assert len(prompt) < 8000, "one request's prompt must stay bounded"
 
 
 def test_segment_facts_are_relative_and_invent_nothing():
@@ -427,7 +445,7 @@ def test_segment_titles_open_segments_and_captions_stay_inside(gemini):
         if t.endswith("BEGINS"):
             current = t.split()[1]
         else:
-            assert t.startswith(f"PART {current} LINE"), f"{t!r} outside segment {current}"
+            assert t.startswith(f"PART {current} "), f"{t!r} outside segment {current}"
     assert not any(t.startswith("CHAPTER ") for t in texts)
 
 
@@ -480,7 +498,7 @@ def test_generated_text_is_displayed_uppercase(gemini):
     v = generate_photobook_variations_engine(photo_sets()["single"], batch)[0]
     assert v.cover_title == "WEDDING COVER 1"
     assert v.cover_subtitle == "EDITION 1"
-    assert text_slots(v)[0] == "WEDDING MOMENT 1.1"
+    assert text_slots(v)[0] == "WEDDING MOMENT ALPHA"
 
 
 def test_user_subtitle_keeps_its_case(gemini):

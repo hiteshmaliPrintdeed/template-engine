@@ -18,7 +18,7 @@ import hashlib
 import re
 import unicodedata
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from reportlab.pdfbase.pdfmetrics import stringWidth
 
@@ -139,7 +139,7 @@ _UNVERIFIABLE_TERMS = (
     "indoor", "indoors", "outdoor", "outdoors", "outside", "inside", "sky", "skies", "sea", "ocean",
     "beach", "shore", "waves", "garden", "gardens", "park", "grass", "field", "fields", "meadow",
     "forest", "woods", "tree", "trees", "mountain", "mountains", "hill", "hills", "lake", "river",
-    "city", "street", "streets", "road", "roads", "plaza", "balcony", "waterfront", "room", "couch", "sofa", "bench",
+    "city", "street", "streets", "road", "roads", "plaza", "balcony", "waterfront", "room", "rooms", "couch", "sofa", "bench",
     "stage", "venue", "table", "kitchen", "home",
     # specific relationships (the warm generic ones -- family, friends, loved
     # ones, together -- are fine: they describe the book, not a person)
@@ -180,6 +180,22 @@ _PEOPLE_WORDS = re.compile(
     r"embrace|cheers|gathered|gathering|crowd|guests?|everyone|loved ones|people)\b",
     re.IGNORECASE,
 )
+
+
+# Lines that place themselves at the start or end of the story. A segment's
+# lines are spread over ALL its spreads, in any order, so "Final farewell
+# moments" lands mid-book -- measured live: a large closing segment put
+# farewell lines on spreads 3 to 8. Only a title, which sits at the segment's
+# first spread, may say where the story is.
+_POSITION_WORDS = re.compile(
+    r"\b(farewells?|goodbyes?|final|closing|ending|endings|parting|departure|departing|"
+    r"begins|beginning|beginnings|arrival|arriving)\b",
+    re.IGNORECASE,
+)
+
+
+def position_claims(text: str) -> List[str]:
+    return [m.group(1).lower() for m in _POSITION_WORDS.finditer(text or "")]
 
 
 def people_claims(text: str) -> List[str]:
@@ -344,8 +360,19 @@ class BookContent:
 
 @dataclass
 class SegmentContent:
+    """
+    One story segment's text. captions are NEUTRAL lines (true under any photo,
+    free of people words); people are lines for spreads where face detection
+    found someone. Pools are sized to the segment's spreads, so no spread in
+    the book needs to repeat a line.
+    """
     title: str
     captions: List[str]
+    people: List[str] = field(default_factory=list)
+
+    @property
+    def all_lines(self) -> List[str]:
+        return list(self.captions) + list(self.people)
 
 
 @dataclass
@@ -472,21 +499,62 @@ def validate_chapter_content(
         if entry is None:
             segments.append(None)
             continue
-        people = facts[idx].get("people") if facts and idx < len(facts) else None
-        check = grounded(valid_caption, occasion, people)
-        title = check(entry.get("title"))  # printed in the caption box
-        captions = clean_pool(entry.get("captions"), check, MAX_SEGMENT_CAPTIONS)
-        if title and title.upper() in {c.upper() for c in captions}:
-            captions = [c for c in captions if c.upper() != title.upper()]
-        if title is None or len(captions) < MIN_SEGMENT_CAPTIONS:
+        people_fact = facts[idx].get("people") if facts and idx < len(facts) else None
+        title = grounded(valid_caption, occasion, people_fact)(entry.get("title"))  # printed in the caption box
+        neutral, people = split_pools(entry, valid_caption, occasion, people_fact)
+        if title:
+            neutral = [c for c in neutral if c.upper() != title.upper()]
+            people = [c for c in people if c.upper() != title.upper()]
+        if title is None or len(neutral) + len(people) < MIN_SEGMENT_CAPTIONS:
             segments.append(None)
             continue
-        segments.append(SegmentContent(title=title, captions=captions))
+        segments.append(SegmentContent(title=title, captions=neutral, people=people))
 
     if not any(segments):
         raise StoryContentInvalid("no segment passed validation")
     dedupe_across_segments(segments)
     return ChapterContent(signature=signature, segments=segments)
+
+
+# A pool is sized to its spreads, not a fixed handful; this cap only guards
+# against a runaway response.
+MAX_POOL_LINES = 240
+
+
+def split_pools(
+    entry: Dict[str, Any],
+    validator,
+    occasion: Optional[str],
+    people_fact: Optional[str] = None,
+    limit: int = MAX_POOL_LINES,
+) -> Tuple[List[str], List[str]]:
+    """
+    (neutral, people) lines from one segment entry.
+
+    Neutral lines are placed on spreads without faces, so any line with a
+    people word is refused there. People lines keep them. The single
+    "captions" list of the earlier response shape (and of cached entries) is
+    still read: its people lines are sorted into the people pool.
+    """
+    def placeable(check):
+        # Lines, unlike titles, must not claim a position in the story.
+        def run(value: Any) -> Optional[str]:
+            text = check(value)
+            return None if text is None or position_claims(text) else text
+        return run
+
+    no_people = placeable(grounded(validator, occasion, NO_PEOPLE))
+    with_people = placeable(grounded(validator, occasion, None))
+    if "neutral_lines" in entry or "people_lines" in entry:
+        neutral = clean_pool(entry.get("neutral_lines"), no_people, limit)
+        people = clean_pool(entry.get("people_lines"), with_people, limit)
+    else:
+        mixed = clean_pool(entry.get("captions"), with_people, limit)
+        neutral = [c for c in mixed if not people_claims(c)]
+        people = [c for c in mixed if people_claims(c)]
+    if people_fact == NO_PEOPLE:
+        people = []
+    return neutral, people
 
 
 # ---------------------------------------------------------------------------
@@ -532,6 +600,9 @@ class StoryContext:
     chapters: List[ChapterContext]
     segments: List[List[int]]   # chapter indices per segment, contiguous, in order
     signature: str
+    # Per segment: {"people": n, "neutral": m} -- the lines needed so that no
+    # spread in any variation repeats a caption (spread_plan.caption_demand).
+    demand: List[Dict[str, int]] = field(default_factory=list)
 
     @property
     def chapter_segment(self) -> List[int]:
@@ -657,14 +728,19 @@ def build_story_context(prompt: str, photos: Sequence[Any]) -> StoryContext:
         prev_last = ch_photos[-1] if ch_photos else prev_last
         prev_end = end or prev_end
 
-    return StoryContext(
+    segments = _group_segments(chapters)
+    ctx = StoryContext(
         prompt=prompt or "",
         normalized_prompt=normalize_prompt(prompt),
         raw_chapters=raw_chapters,
         chapters=chapters,
-        segments=_group_segments(chapters),
+        segments=segments,
         signature=chapter_signature(raw_chapters),
     )
+    from app.engine.spread_plan import caption_demand
+
+    ctx.demand = caption_demand(raw_chapters, ctx.chapter_segment, len(segments))
+    return ctx
 
 
 # ---------------------------------------------------------------------------
@@ -746,26 +822,33 @@ def valid_vision_title(value: Any) -> Optional[str]:
 
 
 def validate_vision_segment(
-    raw: Any, occasion: Optional[str] = None, people: Optional[str] = None
+    raw: Any, occasion: Optional[str] = None, people: Optional[str] = None, need_title: bool = True
 ) -> SegmentContent:
-    """One segment's vision response -> SegmentContent, or StoryContentInvalid."""
+    """
+    One segment's (or sub-part's) vision response -> SegmentContent, or
+    StoryContentInvalid. Sub-parts after the first carry no title: only the
+    segment's opening spread prints one.
+    """
     if not isinstance(raw, dict):
         raise StoryContentInvalid("response is not a JSON object")
     # Gemini's own report of the photos it saw. Unlike local face counts it
     # cannot silently be zero, so it is trusted to switch the people filter on:
     # "some" (a mixed chapter) as much as "none", since a people line would be
     # printed under the photos without people too.
-    if str(raw.get("people_visible", "")).strip().lower() in ("none", "some"):
+    if str(raw.get("people_visible", "")).strip().lower() == "none":
         people = NO_PEOPLE
-    title = grounded(valid_vision_title, occasion, people)(raw.get("title"))
-    captions = clean_pool(raw.get("captions"), grounded(valid_vision_caption, occasion, people), MAX_SEGMENT_CAPTIONS)
+    title = grounded(valid_vision_title, occasion, people)(raw.get("title")) if need_title else ""
+    neutral, people_lines = split_pools(raw, valid_vision_caption, occasion, people)
     if title:
-        captions = [c for c in captions if c.upper() != title.upper()]
-    if title is None:
+        neutral = [c for c in neutral if c.upper() != title.upper()]
+        people_lines = [c for c in people_lines if c.upper() != title.upper()]
+    if need_title and not title:
         raise StoryContentInvalid(f"unusable title {raw.get('title')!r}")
-    if len(captions) < MIN_SEGMENT_CAPTIONS:
-        raise StoryContentInvalid(f"{len(captions)} usable captions, need {MIN_SEGMENT_CAPTIONS}")
-    return SegmentContent(title=title, captions=captions)
+    if len(neutral) + len(people_lines) < MIN_SEGMENT_CAPTIONS:
+        raise StoryContentInvalid(
+            f"{len(neutral) + len(people_lines)} usable captions, need {MIN_SEGMENT_CAPTIONS}"
+        )
+    return SegmentContent(title=title, captions=neutral, people=people_lines)
 
 
 def is_chapter_label(text: Optional[str]) -> bool:

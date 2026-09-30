@@ -27,6 +27,15 @@ from tests.fixtures.golden_story import _photo
 # Fakes
 # ---------------------------------------------------------------------------
 
+# Distinct words for fake lines. Formulaic fakes ("line 1", "line 2") share
+# almost every word, so the book-wide near-duplicate check (rightly) treats
+# them as one line; real captions differ in wording, and so must the fakes.
+WORDS = (
+    "alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo lima mike "
+    "november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu "
+    "gamma kappa sigma omega theta zeta iota lambda epsilon upsilon omicron rho tau chi psi"
+).split()
+
 def book_response():
     return {
         "category": "Celebration",
@@ -34,7 +43,7 @@ def book_response():
         "subtitles": ["A day to remember", "Together forever"],
         "variations": [
             {"theme_name": t, "cover_title": f"Cover {n}", "cover_subtitle": f"Edition {n}",
-             "captions": [f"Book line {n} number {k}" for k in range(1, 7)]}
+             "captions": [f"Book {n} {WORDS[k]} story" for k in range(6)]}
             for n, t in ((1, "Warm"), (2, "Elegant"), (3, "Minimal"))
         ],
     }
@@ -43,14 +52,14 @@ def book_response():
 def text_chapters(n):
     return {"segments": [
         {"segment_index": i, "title": f"Text part {i + 1}",
-         "captions": [f"Text line {i + 1} number {k}" for k in range(1, 5)]}
+         "captions": [f"Text {i + 1} {WORDS[k]} story" for k in range(20)]}
         for i in range(n)
     ]}
 
 
 def vision_segment(i):
     return {"title": f"Seen part {i + 1}",
-            "captions": [f"Seen line {i + 1} number {k}" for k in range(1, 7)]}
+            "captions": [f"Seen {i + 1} {WORDS[k]} story" for k in range(20)]}
 
 
 class FakeGemini:
@@ -66,7 +75,7 @@ class FakeGemini:
             self.calls.append((kind, len(images or [])))
         if kind == "book":
             return book_response()
-        if kind == "chapters":
+        if kind.startswith("chapters"):
             return text_chapters(self.n_segments)
         assert kind.startswith("vision segment=")
         idx = int(kind.split("=")[1])
@@ -77,7 +86,8 @@ class FakeGemini:
         return vision_segment(idx)
 
     def kinds(self, prefix):
-        return [k for k, _ in self.calls if k.startswith(prefix)]
+        # Text requests are labelled "chapters [0.0,1.0]"; normalise to the kind.
+        return [k.split(" [")[0] for k, _ in self.calls if k.startswith(prefix)]
 
     def images_sent(self):
         return sum(n for _, n in self.calls)
@@ -169,7 +179,7 @@ def test_vision_captions_reach_the_page(gemini):
         for pg in (sp.left_page, sp.right_page) for s in pg.slots if s.type == "text"
     ]
     assert texts[0] == "SEEN PART 1"
-    assert any(t.startswith("SEEN LINE 2") for t in texts)
+    assert any(t.startswith("SEEN 2 ") for t in texts)
 
 
 def test_failed_segment_is_filled_from_text_only(gemini):
@@ -247,8 +257,10 @@ def test_changing_one_segment_recaptions_only_that_segment(gemini):
 def test_vision_captions_are_filtered(bad):
     seg = validate_vision_segment({"title": "Where it all began",
                                    "captions": [bad, "Warm smiles all around", "Together in this moment"]})
-    assert bad not in seg.captions
-    assert seg.captions == ["Warm smiles all around", "Together in this moment"]
+    assert bad not in seg.all_lines
+    # A line with a people word goes to the people pool, the rest stay neutral.
+    assert seg.captions == ["Together in this moment"]
+    assert seg.people == ["Warm smiles all around"]
 
 
 @pytest.mark.parametrize("claim", [
@@ -271,10 +283,10 @@ def test_unverifiable_claims_are_dropped(claim):
 ])
 def test_people_lines_dropped_where_faces_are_rare(line):
     raw = {"title": "Where it all began", "captions": [line, "Wonders along the way", "Every step tells a story"]}
-    # Face detection found people: the line is fine.
-    assert line in validate_vision_segment(raw, occasion="Trip", people="a few people").captions
-    # Mostly animals, landscapes or objects: the line would be wrong under most photos.
-    assert line not in validate_vision_segment(raw, occasion="Trip", people="few or no people").captions
+    # Face detection found people: the line is kept, in the people pool.
+    assert line in validate_vision_segment(raw, occasion="Trip", people="a few people").people
+    # Mostly animals, landscapes or objects: no people lines at all.
+    assert line not in validate_vision_segment(raw, occasion="Trip", people="few or no people").all_lines
 
 
 @pytest.mark.parametrize("line, seen", [
@@ -297,7 +309,7 @@ def test_gemini_reporting_few_people_enables_the_people_filter(seen):
 def test_gemini_reporting_all_people_keeps_people_lines():
     raw = {"people_visible": "all", "title": "Where it all began",
            "captions": ["Smiles shared among friends", "Every step tells a story"]}
-    assert "Smiles shared among friends" in validate_vision_segment(raw, occasion="Trip").captions
+    assert "Smiles shared among friends" in validate_vision_segment(raw, occasion="Trip").people
 
 
 @pytest.mark.parametrize("line", [
@@ -354,9 +366,9 @@ def test_occasion_text_grounds_its_own_words():
 
 def test_trailing_full_stop_is_removed_but_ellipsis_kept():
     seg = validate_vision_segment({"title": "Where it all began.",
-                                   "captions": ["Warm smiles all around.", "And so it begins..."]})
+                                   "captions": ["Warm smiles all around.", "And so it goes on..."]})
     assert seg.title == "Where it all began"
-    assert seg.captions == ["Warm smiles all around", "And so it begins..."]
+    assert seg.all_lines == ["And so it goes on...", "Warm smiles all around"]
 
 
 def test_vision_segment_without_usable_title_is_rejected():
