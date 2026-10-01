@@ -23,6 +23,7 @@ import ParallaxHeroImages from './ui/ParallaxHeroImages';
 import PixovoClientDownsampler from '../utils/client_downsampler';
 import PhotoFrame from './PhotoFrame';
 import { useToast } from './Toast';
+import '../styles/cosmic-stars.css';
 
 const OCCASION_CARDS = [
   {
@@ -491,6 +492,13 @@ export default function AIChatbotWidget({
           ================================================================= */}
       {!hasStartedStory && (
         <div className="mx-hero-viewport">
+          {/* Uiverse Cosmic Starfield Background */}
+          <div className="cosmic-container">
+            <div id="stars" />
+            <div id="stars2" />
+            <div id="stars3" />
+          </div>
+
           {/* Floating 3D Parallax Images that respond to mouse physics */}
           <ParallaxHeroImages images={heroParallaxImages} />
 
@@ -621,12 +629,30 @@ export default function AIChatbotWidget({
       )}
 
       {/* =================================================================
-          SCREEN 2: CONVERSATIONAL THREAD + INLINE UPLOAD & STYLE
+          SCREEN 2: UNIFIED COSMIC CHAT & PHOTO INGESTION INTERFACE
           ================================================================= */}
       {hasStartedStory && (
-        <div className="mx-chat-thread">
-          {/* Top Stage Bar with Back to Home navigation */}
-          <div className="mx-chat-top-bar">
+        <div className="mx-cosmic-story-shell">
+          {/* Uiverse Cosmic Starfield Background */}
+          <div className="cosmic-container">
+            <div id="stars" />
+            <div id="stars2" />
+            <div id="stars3" />
+          </div>
+
+          {/* Top Stage Bar with Back navigation */}
+          <div
+            className="mx-chat-top-bar"
+            style={{
+              position: 'relative',
+              zIndex: 10,
+              maxWidth: '1200px',
+              margin: '0 auto',
+              width: '100%',
+              padding: '1rem clamp(1rem, 3.5vw, 2.5rem) 0.5rem',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.1)'
+            }}
+          >
             <button
               type="button"
               className="mx-chat-back-btn"
@@ -635,485 +661,670 @@ export default function AIChatbotWidget({
                 setHeroStoryInput('');
               }}
               title="Return to Story Mode Welcome Hero"
+              style={{
+                color: 'rgba(255, 255, 255, 0.85)',
+                background: 'rgba(255, 255, 255, 0.08)',
+                borderColor: 'rgba(255, 255, 255, 0.16)'
+              }}
             >
               <ArrowLeft size={14} strokeWidth={2.4} />
               <span>Back to Story Selector</span>
             </button>
-            <span className="mx-chat-stage-pill">
-              <Sparkles size={11} strokeWidth={2.2} style={{ marginRight: '4px', verticalAlign: '-1px' }} />
-              Story Mode · Customizing
-            </span>
-          </div>
-
-          {/* Render User & AI Conversation Turns */}
-          {messages.map((msg, idx) => {
-            if (msg.role === 'user') {
-              return (
-                <div key={msg.id || idx} className="mx-user-bubble-row">
-                  <div className="mx-user-bubble">{msg.text}</div>
-                </div>
-              );
-            }
-            return (
-              <div key={msg.id || idx} className="mx-ai-turn">
-                <span className="mx-ai-badge">
-                  <Sparkles size={12} strokeWidth={2.2} />
-                  Story Companion
-                </span>
-                <p className="mx-ai-text">{msg.text}</p>
-
-                {/* Show Quick-Reply Story Details Chips under the first AI turn */}
-                {idx === 1 && (
-                  <div className="mx-Quick-chips">
-                    {FOLLOWUP_CHIPS.map((chip) => {
-                      const active = selectedChips.includes(chip);
-                      return (
-                        <button
-                          key={chip}
-                          type="button"
-                          className={`mx-chip-btn ${active ? 'active' : ''}`}
-                          onClick={() => handleToggleFollowupChip(chip)}
-                        >
-                          {active && (
-                            <Check
-                              size={13}
-                              strokeWidth={2.5}
-                              style={{ marginRight: '5px', verticalAlign: '-2px' }}
-                            />
-                          )}
-                          {chip}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {/* Inline Photo Upload Turn */}
-          <div className="mx-ai-turn">
-            <span className="mx-ai-badge">
-              <ImageIcon size={12} strokeWidth={2.2} />
-              Photo Curation
-            </span>
-            <p className="mx-ai-text">
-              {totalCount === 0
-                ? "Now let's bring your photos into the story. Select up to 1,000 photos — we'll automatically filter out blurry shots and duplicates."
-                : isPhotoUploadComplete && !isDownsampling
-                ? `Great — your ${survivedCount} curated photos are ready! Tap Manage Photos anytime to review or add more.`
-                : 'Great — your photos are uploading and being curated. Tap Manage Photos to view them.'}
-            </p>
-
-            {/* State A: 0 photos uploaded yet -> Inline Dropzone Card */}
-            {totalCount === 0 && !isDownsampling && (
-              <div
-                className="mx-inline-upload-card"
-                onClick={triggerFilePicker}
-                style={{
-                  cursor: 'pointer',
-                  borderStyle: dragActive ? 'solid' : 'dashed',
-                  borderColor: dragActive ? 'var(--px-brand-iris)' : 'var(--px-brand-iris-border)',
-                  textAlign: 'center',
-                  padding: '1.65rem 1.25rem'
-                }}
-              >
-                <UploadCloud
-                  size={34}
-                  color="var(--px-brand-iris)"
-                  strokeWidth={1.75}
-                  style={{ margin: '0 auto 0.55rem' }}
-                />
-                <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--px-text-primary)', marginBottom: '0.25rem' }}>
-                  Tap to select photos, or drag &amp; drop here
-                </div>
-                <div style={{ fontSize: '0.84rem', color: 'var(--px-text-secondary)' }}>
-                  Fast 512px client-side curation • Supports JPEG, PNG, WebP
-                </div>
-              </div>
-            )}
-
-            {/* State B: Photos Downsampling or Uploading/Ready -> Inline Thumbnail Strip */}
-            {(totalCount > 0 || isDownsampling) && (
-              <div className="mx-inline-upload-card">
-                <div className="mx-inline-upload-header">
-                  <span className="mx-inline-upload-title">
-                    {isDownsampling ? (
-                      <>
-                        <RefreshCw size={15} className="animate-spin" color="var(--px-brand-iris)" />
-                        <span>
-                          Preparing your photos ({downsampleStats.completed}/{downsampleStats.total})...
-                        </span>
-                      </>
-                    ) : !isPhotoUploadComplete ? (
-                      <>
-                        <RefreshCw size={15} className="animate-spin" color="var(--px-brand-iris)" />
-                        <span>
-                          Uploading your photos ({completedCount}/{totalCount})...
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <Check size={16} strokeWidth={2.5} color="var(--px-status-success-text)" />
-                        <span>
-                          {survivedCount} photos curated &amp; ready ({totalCount} scanned)
-                        </span>
-                      </>
-                    )}
-                  </span>
-
-                  <button
-                    type="button"
-                    className="mx-chip-btn"
-                    style={{ padding: '0.35rem 0.85rem', fontSize: '0.78rem' }}
-                    onClick={() => setIsPhotoModalOpen(true)}
-                  >
-                    Manage Photos
-                  </button>
-                </div>
-
-                {/* Horizontal Square Thumbnail Strip + Warm Shimmer Placeholders */}
-                <div className="mx-inline-photo-strip">
-                  {inlineStripThumbs.map((item) => (
-                    <div
-                      key={item.photo_id}
-                      className={`mx-inline-photo-thumb ${item.status === 'rejected' ? 'rejected' : ''}`}
-                      onClick={() => setIsPhotoModalOpen(true)}
-                      title={item.filename}
-                    >
-                      <PhotoFrame
-                        src={item.url}
-                        aspectRatio={1}
-                        dominantColors={item.dominant_colors}
-                        alt={item.filename}
-                        style={{ width: '100%', height: '100%' }}
-                      />
-                    </div>
-                  ))}
-
-                  {Array.from({ length: shimmerPlaceholderCount }).map((_, sIdx) => (
-                    <div key={`shimmer-${sIdx}`} className="mx-inline-photo-shimmer" />
-                  ))}
-
-                  {reconciledPhotos.length > inlineStripThumbs.length && (
-                    <button
-                      type="button"
-                      onClick={() => setIsPhotoModalOpen(true)}
-                      style={{
-                        width: '68px',
-                        height: '68px',
-                        borderRadius: '11px',
-                        border: '1px solid var(--px-brand-iris-border)',
-                        background: 'var(--px-brand-iris-subtle)',
-                        color: 'var(--px-brand-iris)',
-                        fontWeight: 700,
-                        fontSize: '0.84rem',
-                        flexShrink: 0,
-                        cursor: 'pointer'
-                      }}
-                    >
-                      +{reconciledPhotos.length - inlineStripThumbs.length}
-                    </button>
-                  )}
-                </div>
-
-                {/* Progress Bar */}
-                {(!isPhotoUploadComplete || isDownsampling) && (
-                  <div className="mx-inline-progress-bar">
-                    <div
-                      className="mx-inline-progress-fill"
-                      style={{ width: `${Math.max(8, uploadPct)}%` }}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Turn 3: Inline Story Style, Cover Title & "Start creating my book" CTA */}
-          <div className="mx-ai-turn">
-            <span className="mx-ai-badge">
-              <BookOpen size={12} strokeWidth={2.2} />
-              Editorial Styling
-            </span>
-            <p className="mx-ai-text">
-              How should we style your pages and cover? Choose your storytelling preference below, then tap{' '}
-              <strong>Start creating my book</strong> to reveal 3 custom editions.
-            </p>
-
-            {/* 2 Storytelling Style Cards */}
-            <div className="mx-style-options-grid">
-              <button
-                type="button"
-                className={`mx-style-option-card ${includeText ? 'selected' : ''}`}
-                onClick={() => setIncludeText(true)}
-                disabled={isLoading}
-              >
-                <div className="mx-style-option-title">
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                    <BookOpen size={16} color="var(--px-brand-iris)" />
-                    Storytelling Captions
-                  </span>
-                  {includeText && <Check size={16} strokeWidth={2.5} color="var(--px-brand-iris)" />}
-                </div>
-                <div className="mx-style-option-desc">
-                  Pairs AI-crafted chapter headers and warm narrative captions alongside your photos.
-                </div>
-              </button>
-
-              <button
-                type="button"
-                className={`mx-style-option-card ${!includeText ? 'selected' : ''}`}
-                onClick={() => setIncludeText(false)}
-                disabled={isLoading}
-              >
-                <div className="mx-style-option-title">
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                    <ImageIcon size={16} color="var(--px-brand-iris)" />
-                    Clean Photo-Forward
-                  </span>
-                  {!includeText && <Check size={16} strokeWidth={2.5} color="var(--px-brand-iris)" />}
-                </div>
-                <div className="mx-style-option-desc">
-                  Dedicates 100% of every inner spread to photography with zero text boxes.
-                </div>
-              </button>
-            </div>
-
-            {includeText && (
-              <label
-                className="studio-vision-optin"
-                style={{
-                  display: 'flex',
-                  gap: '10px',
-                  alignItems: 'flex-start',
-                  marginTop: '0.75rem',
-                  padding: '0.75rem 1rem',
-                  background: 'rgba(255, 255, 255, 0.7)',
-                  border: '1px solid var(--px-border-light)',
-                  borderRadius: '12px',
-                  cursor: isLoading ? 'default' : 'pointer'
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={usePhotoVision}
-                  onChange={(e) => setUsePhotoVision(e.target.checked)}
-                  disabled={isLoading}
-                  style={{ marginTop: '3px', accentColor: 'var(--px-brand-iris)' }}
-                />
-                <span style={{ fontSize: '0.85rem', color: 'var(--px-text-primary)' }}>
-                  <strong>Let AI look at a few of my photos to write captions</strong>
-                  <br />
-                  <small style={{ color: 'var(--px-text-secondary)', fontSize: '0.78rem' }}>
-                    About 3 photos per chapter are sent to Google Gemini. Off by default.
-                  </small>
-                </span>
-              </label>
-            )}
-
-            {/* Optional AI Cover Title Card */}
-            <div
+            <span
+              className="mx-chat-stage-pill"
               style={{
-                marginTop: '0.75rem',
-                background: '#ffffff',
-                border: '1px solid var(--px-border-light)',
-                borderRadius: '16px',
-                padding: '1rem 1.15rem',
-                boxShadow: 'var(--px-shadow-sm)'
+                color: '#4BB8C4',
+                background: 'rgba(75, 184, 196, 0.15)',
+                borderColor: 'rgba(75, 184, 196, 0.35)'
               }}
             >
+              <Sparkles size={11} strokeWidth={2.2} style={{ marginRight: '4px', verticalAlign: '-1px' }} />
+              Story Mode · AI Cosmic Studio
+            </span>
+          </div>
+
+          {/* Two-Column Cosmic Content Layout */}
+          <div className="mx-cosmic-content-layout">
+            {/* LEFT PANEL: AI Talking Indicator & Live Upload Radar */}
+            <aside className="mx-cosmic-left-panel">
+              {/* Uiverse-powered Pulsing AI Talking Loader with 4-Color Smooth Rainbow Transition */}
               <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: '0.75rem',
-                  flexWrap: 'wrap',
-                  marginBottom: '0.75rem'
-                }}
+                className="pixovo-cosmic-loader-wrap"
+                title="Pixovo AI Companion talking & analyzing"
               >
+                <div className="pixovo-cosmic-halo" />
+                <span className="loader" />
+              </div>
+
+              <div className="mx-cosmic-ai-badge">
+                <Sparkles size={11} strokeWidth={2.2} />
+                <span>AI Talking Companion</span>
+              </div>
+
+              <h3 className="mx-cosmic-ai-status-title">
+                {isDownsampling
+                  ? 'Curating Photos...'
+                  : !isPhotoUploadComplete && totalCount > 0
+                  ? 'Uploading & Analyzing...'
+                  : isSuggestingTitles
+                  ? 'Crafting Titles...'
+                  : isLoading
+                  ? 'Synthesizing Book...'
+                  : 'AI Story Guide'}
+              </h3>
+
+              <p className="mx-cosmic-ai-status-sub">
+                {isDownsampling
+                  ? `Scanning & filtering duplicates (${downsampleStats.completed}/${downsampleStats.total})`
+                  : !isPhotoUploadComplete && totalCount > 0
+                  ? `Processing high-res memories (${completedCount}/${totalCount})`
+                  : 'Listening to your story details and orchestrating your print edition.'}
+              </p>
+
+              {/* Photo Ingestion & Curation Mini Tracker */}
+              <div className="mx-cosmic-upload-tracker">
+                <div className="mx-cosmic-upload-header">
+                  <span>Photo Status</span>
+                  <span style={{ color: '#4BB8C4' }}>
+                    {isPhotoUploadComplete && !isDownsampling && totalCount > 0
+                      ? `${survivedCount} Ready`
+                      : totalCount > 0
+                      ? `${uploadPct}%`
+                      : '0 Photos'}
+                  </span>
+                </div>
+
+                <div className="mx-cosmic-progress-track">
+                  <div
+                    className="mx-cosmic-progress-fill"
+                    style={{ width: `${Math.max(totalCount > 0 ? 8 : 0, uploadPct)}%` }}
+                  />
+                </div>
+
                 <div
                   style={{
                     display: 'flex',
+                    justifyContent: 'space-between',
                     alignItems: 'center',
-                    gap: '0.45rem',
-                    fontWeight: 700,
-                    fontSize: '0.9rem',
-                    color: 'var(--px-text-primary)'
+                    marginTop: '0.2rem'
                   }}
                 >
-                  <Type size={15} color="var(--px-brand-iris)" />
-                  <span>Book Cover Title</span>
+                  <span style={{ fontSize: '0.74rem', color: 'rgba(255, 255, 255, 0.6)' }}>
+                    {totalCount > 0
+                      ? `${completedCount}/${totalCount} scanned • ${survivedCount} curated`
+                      : 'No photos selected yet'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={totalCount > 0 ? () => setIsPhotoModalOpen(true) : triggerFilePicker}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#4BB8C4',
+                      fontSize: '0.74rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      textDecoration: 'underline'
+                    }}
+                  >
+                    {totalCount > 0 ? 'Manage' : '+ Add Photos'}
+                  </button>
                 </div>
+
+                {/* Mini Live Photo Strip in Left Panel */}
+                {inlineStripThumbs.length > 0 && (
+                  <div className="mx-cosmic-thumbs-strip">
+                    {inlineStripThumbs.slice(0, 6).map((item) => (
+                      <div
+                        key={item.photo_id}
+                        className="mx-cosmic-thumb-item"
+                        onClick={() => setIsPhotoModalOpen(true)}
+                        title={item.filename}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <PhotoFrame
+                          src={item.url}
+                          aspectRatio={1}
+                          dominantColors={item.dominant_colors}
+                          alt={item.filename}
+                          style={{ width: '100%', height: '100%' }}
+                        />
+                      </div>
+                    ))}
+                    {reconciledPhotos.length > 6 && (
+                      <div
+                        className="mx-cosmic-thumb-item"
+                        onClick={() => setIsPhotoModalOpen(true)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          background: 'rgba(255, 255, 255, 0.1)',
+                          color: '#ffffff',
+                          fontSize: '0.74rem',
+                          fontWeight: 700,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        +{reconciledPhotos.length - 6}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </aside>
+
+            {/* MAIN PANEL: Conversational Turns & Inner Customization */}
+            <main className="mx-cosmic-main-panel">
+              <div className="mx-cosmic-turns-box">
+                {/* User & AI Conversation Turns */}
+                {messages.map((msg, idx) => {
+                  if (msg.role === 'user') {
+                    return (
+                      <div key={msg.id || idx} className="mx-cosmic-user-row">
+                        <div className="mx-cosmic-user-bubble">{msg.text}</div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={msg.id || idx} className="mx-cosmic-ai-row">
+                      <div className="mx-cosmic-ai-head">
+                        <Sparkles size={13} strokeWidth={2.4} />
+                        <span>Story Companion</span>
+                      </div>
+                      <p className="mx-cosmic-ai-text">{msg.text}</p>
+                    </div>
+                  );
+                })}
+
+                {/* Inline Photo Ingestion Status in Main Flow */}
+                <div className="mx-cosmic-ai-row">
+                  <div className="mx-cosmic-ai-head">
+                    <ImageIcon size={13} strokeWidth={2.4} />
+                    <span>Photo Ingestion &amp; Curation</span>
+                  </div>
+                  <p className="mx-cosmic-ai-text">
+                    {totalCount === 0
+                      ? "Select up to 1,000 photos — our engine automatically removes blurs and duplicates while you describe your story."
+                      : isPhotoUploadComplete && !isDownsampling
+                      ? `All ${survivedCount} curated photos are ready! You can review them anytime or proceed to create your book.`
+                      : `Uploading and analyzing photo quality (${completedCount} of ${totalCount})...`}
+                  </p>
+
+                  {/* Dropzone if 0 photos */}
+                  {totalCount === 0 && !isDownsampling && (
+                    <div
+                      className="mx-inline-upload-card"
+                      onClick={triggerFilePicker}
+                      style={{
+                        cursor: 'pointer',
+                        border: '1.5px dashed rgba(255, 255, 255, 0.25)',
+                        background: 'rgba(255, 255, 255, 0.04)',
+                        textAlign: 'center',
+                        padding: '1.5rem',
+                        borderRadius: '16px'
+                      }}
+                    >
+                      <UploadCloud size={32} color="#4BB8C4" style={{ margin: '0 auto 0.4rem' }} />
+                      <div
+                        style={{
+                          fontWeight: 700,
+                          fontSize: '0.96rem',
+                          color: '#ffffff',
+                          marginBottom: '0.2rem'
+                        }}
+                      >
+                        Tap to add photos, or drop them anywhere
+                      </div>
+                      <div style={{ fontSize: '0.8rem', color: 'rgba(255, 255, 255, 0.6)' }}>
+                        Fast 512px local worker curation • Supports JPEG, PNG, WebP
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Thumbnail Strip if photos exist */}
+                  {(totalCount > 0 || isDownsampling) && (
+                    <div
+                      style={{
+                        background: 'rgba(255, 255, 255, 0.04)',
+                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        borderRadius: '16px',
+                        padding: '1rem'
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginBottom: '0.75rem'
+                        }}
+                      >
+                        <span style={{ fontSize: '0.84rem', fontWeight: 600, color: '#ffffff' }}>
+                          {isDownsampling ? (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}>
+                              <RefreshCw size={14} className="animate-spin" color="#4BB8C4" />
+                              Preparing ({downsampleStats.completed}/{downsampleStats.total})...
+                            </span>
+                          ) : !isPhotoUploadComplete ? (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}>
+                              <RefreshCw size={14} className="animate-spin" color="#4BB8C4" />
+                              Uploading ({completedCount}/{totalCount})...
+                            </span>
+                          ) : (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}>
+                              <Check size={15} color="#0BA28D" />
+                              {survivedCount} photos curated &amp; ready ({totalCount} scanned)
+                            </span>
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          className="mx-cosmic-chip"
+                          onClick={() => setIsPhotoModalOpen(true)}
+                        >
+                          Manage Photos
+                        </button>
+                      </div>
+
+                      <div className="mx-cosmic-thumbs-strip">
+                        {inlineStripThumbs.map((item) => (
+                          <div
+                            key={item.photo_id}
+                            className="mx-cosmic-thumb-item"
+                            onClick={() => setIsPhotoModalOpen(true)}
+                            style={{ cursor: 'pointer', width: '56px', height: '56px' }}
+                            title={item.filename}
+                          >
+                            <PhotoFrame
+                              src={item.url}
+                              aspectRatio={1}
+                              dominantColors={item.dominant_colors}
+                              alt={item.filename}
+                              style={{ width: '100%', height: '100%' }}
+                            />
+                          </div>
+                        ))}
+                        {Array.from({ length: shimmerPlaceholderCount }).map((_, sIdx) => (
+                          <div
+                            key={`shimmer-${sIdx}`}
+                            className="mx-cosmic-thumb-item"
+                            style={{
+                              width: '56px',
+                              height: '56px',
+                              background:
+                                'linear-gradient(90deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.12) 50%, rgba(255,255,255,0.05) 75%)',
+                              backgroundSize: '200% 100%',
+                              animation: 'pxShimmer 1.5s infinite linear'
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Editorial Styling & Cover Title Card */}
+                <div className="mx-cosmic-card">
+                  <div className="mx-cosmic-ai-head" style={{ marginBottom: '0.75rem' }}>
+                    <BookOpen size={13} strokeWidth={2.4} />
+                    <span>Editorial Styling</span>
+                  </div>
+
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                      gap: '0.75rem'
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className={`mx-cosmic-style-btn ${includeText ? 'selected' : ''}`}
+                      onClick={() => setIncludeText(true)}
+                      disabled={isLoading}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          fontWeight: 700,
+                          fontSize: '0.92rem',
+                          marginBottom: '0.3rem'
+                        }}
+                      >
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                          <BookOpen size={15} color="#4BB8C4" />
+                          Storytelling Captions
+                        </span>
+                        {includeText && <Check size={15} strokeWidth={2.5} color="#0BA28D" />}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: '0.8rem',
+                          color: 'rgba(255, 255, 255, 0.7)',
+                          lineHeight: 1.4
+                        }}
+                      >
+                        Pairs AI-crafted chapter headers and narrative captions alongside your photos.
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      className={`mx-cosmic-style-btn ${!includeText ? 'selected' : ''}`}
+                      onClick={() => setIncludeText(false)}
+                      disabled={isLoading}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          fontWeight: 700,
+                          fontSize: '0.92rem',
+                          marginBottom: '0.3rem'
+                        }}
+                      >
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                          <ImageIcon size={15} color="#4BB8C4" />
+                          Clean Photo-Forward
+                        </span>
+                        {!includeText && <Check size={15} strokeWidth={2.5} color="#0BA28D" />}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: '0.8rem',
+                          color: 'rgba(255, 255, 255, 0.7)',
+                          lineHeight: 1.4
+                        }}
+                      >
+                        Dedicates 100% of every spread to full-bleed photography with zero text boxes.
+                      </div>
+                    </button>
+                  </div>
+
+                  {includeText && (
+                    <label
+                      style={{
+                        display: 'flex',
+                        gap: '10px',
+                        alignItems: 'flex-start',
+                        marginTop: '0.85rem',
+                        padding: '0.75rem 1rem',
+                        background: 'rgba(255, 255, 255, 0.04)',
+                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        borderRadius: '12px',
+                        cursor: isLoading ? 'default' : 'pointer'
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={usePhotoVision}
+                        onChange={(e) => setUsePhotoVision(e.target.checked)}
+                        disabled={isLoading}
+                        style={{ marginTop: '3px', accentColor: '#0BA28D' }}
+                      />
+                      <span style={{ fontSize: '0.82rem', color: 'rgba(255, 255, 255, 0.9)' }}>
+                        <strong>Let AI inspect a few photos to write captions</strong>
+                        <br />
+                        <small style={{ color: 'rgba(255, 255, 255, 0.55)', fontSize: '0.76rem' }}>
+                          About 3 photos per chapter are sent to Google Gemini. Off by default.
+                        </small>
+                      </span>
+                    </label>
+                  )}
+
+                  {/* Book Cover Title Card */}
+                  <div
+                    style={{
+                      marginTop: '1rem',
+                      paddingTop: '1rem',
+                      borderTop: '1px solid rgba(255, 255, 255, 0.1)'
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginBottom: '0.65rem'
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.45rem',
+                          fontWeight: 700,
+                          fontSize: '0.88rem',
+                          color: '#ffffff'
+                        }}
+                      >
+                        <Type size={14} color="#4BB8C4" />
+                        <span>Book Cover Title</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="mx-cosmic-chip"
+                        onClick={handleSuggestTitles}
+                        disabled={isLoading || isSuggestingTitles}
+                      >
+                        {isSuggestingTitles ? (
+                          <RefreshCw size={12} className="animate-spin" />
+                        ) : (
+                          <Sparkles size={12} color="#F2C94C" />
+                        )}
+                        <span>Suggest AI Titles</span>
+                      </button>
+                    </div>
+
+                    {!isSuggestingTitles && suggestions && suggestions.titles && (
+                      <div className="mx-cosmic-floating-chips" style={{ marginBottom: '0.65rem' }}>
+                        {suggestions.titles.slice(0, 4).map((title, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            className={`mx-cosmic-chip ${selectedTitleIdx === idx ? 'active' : ''}`}
+                            onClick={() => handlePickSuggestedCard(idx)}
+                          >
+                            {title}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                        gap: '0.65rem'
+                      }}
+                    >
+                      <input
+                        type="text"
+                        value={customTitle}
+                        onChange={(e) => {
+                          setSelectedTitleIdx(null);
+                          setCustomTitle(e.target.value);
+                        }}
+                        placeholder="Cover title (or leave blank for AI)..."
+                        disabled={isLoading}
+                        style={{
+                          background: 'rgba(255, 255, 255, 0.06)',
+                          border: '1px solid rgba(255, 255, 255, 0.15)',
+                          borderRadius: '10px',
+                          padding: '0.55rem 0.85rem',
+                          color: '#ffffff',
+                          fontSize: '0.86rem',
+                          outline: 'none'
+                        }}
+                      />
+                      <input
+                        type="text"
+                        value={customSubtitle}
+                        onChange={(e) => setCustomSubtitle(e.target.value)}
+                        placeholder="Optional subtitle (e.g. SUMMER 2026)..."
+                        disabled={isLoading}
+                        style={{
+                          background: 'rgba(255, 255, 255, 0.06)',
+                          border: '1px solid rgba(255, 255, 255, 0.15)',
+                          borderRadius: '10px',
+                          padding: '0.55rem 0.85rem',
+                          color: '#ffffff',
+                          fontSize: '0.86rem',
+                          outline: 'none'
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div ref={threadEndRef} />
+            </main>
+          </div>
+
+          {/* FLOATING NO-BOUNDARY BOTTOM TYPING SECTION & QUICK OPTIONS */}
+          <div className="mx-cosmic-bottom-bar">
+            <div className="mx-cosmic-bottom-inner">
+              {/* Floating Quick Ideas / Followup Chips */}
+              <div className="mx-cosmic-floating-chips">
+                {FOLLOWUP_CHIPS.map((chip) => {
+                  const active = selectedChips.includes(chip);
+                  return (
+                    <button
+                      key={chip}
+                      type="button"
+                      className={`mx-cosmic-chip ${active ? 'active' : ''}`}
+                      onClick={() => handleToggleFollowupChip(chip)}
+                    >
+                      {active && (
+                        <Check
+                          size={11}
+                          strokeWidth={2.5}
+                          style={{ marginRight: '4px', verticalAlign: '-1px' }}
+                        />
+                      )}
+                      {chip}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Visually Borderless / No Boundary Floating Typing Slot */}
+              <form
+                className="mx-cosmic-noboundary-input-wrap"
+                onSubmit={handleSendMessage}
+              >
+                <button
+                  type="button"
+                  className="mx-cosmic-chip"
+                  onClick={() => {
+                    if (totalCount > 0) setIsPhotoModalOpen(true);
+                    else triggerFilePicker();
+                  }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                    padding: '0.42rem 0.85rem'
+                  }}
+                  title="Upload or manage photos"
+                >
+                  <ImageIcon size={15} color="#4BB8C4" />
+                  <span>Photos {totalCount > 0 ? `(${survivedCount})` : ''}</span>
+                </button>
+
+                <input
+                  type="text"
+                  className="mx-cosmic-noboundary-input"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder="Type your story, trip details, or wishes here... (No boundaries)"
+                  disabled={isLoading}
+                />
+
+                <button
+                  type="submit"
+                  className="mx-cosmic-send-btn"
+                  disabled={!chatInput.trim() || isLoading}
+                  aria-label="Send message"
+                >
+                  <ArrowUp size={18} strokeWidth={2.5} />
+                </button>
 
                 <button
                   type="button"
-                  className="mx-chip-btn"
-                  style={{ padding: '0.35rem 0.85rem', fontSize: '0.8rem', fontWeight: 600 }}
-                  onClick={handleSuggestTitles}
-                  disabled={isLoading || isSuggestingTitles}
+                  className="mx-cosmic-launch-btn"
+                  onClick={handleLaunchBookCreation}
+                  disabled={isLoading || isWaitingForIngest || isDownsampling}
                 >
-                  {isSuggestingTitles ? (
+                  {isWaitingForIngest ? (
                     <>
-                      <RefreshCw size={13} className="animate-spin" style={{ marginRight: '5px' }} />
-                      Suggesting...
+                      <RefreshCw size={16} strokeWidth={2} className="animate-spin" />
+                      <span>Finishing upload...</span>
                     </>
                   ) : (
                     <>
-                      <Sparkles size={13} color="var(--px-brand-iris)" style={{ marginRight: '5px' }} />
-                      Suggest AI Titles
+                      <Sparkles size={16} strokeWidth={2.2} />
+                      <span>Start creating my book</span>
                     </>
                   )}
                 </button>
-              </div>
-
-              {!isSuggestingTitles && suggestions && suggestions.titles && (
-                <div className="mx-Quick-chips" style={{ marginBottom: '0.75rem' }}>
-                  {suggestions.titles.slice(0, 4).map((title, idx) => {
-                    const isSelected = selectedTitleIdx === idx;
-                    return (
-                      <button
-                        key={idx}
-                        type="button"
-                        className={`mx-chip-btn ${isSelected ? 'active' : ''}`}
-                        onClick={() => handlePickSuggestedCard(idx)}
-                      >
-                        {title}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                  gap: '0.65rem'
-                }}
-              >
-                <input
-                  type="text"
-                  className="studio-input"
-                  value={customTitle}
-                  onChange={(e) => {
-                    setSelectedTitleIdx(null);
-                    setCustomTitle(e.target.value);
-                  }}
-                  placeholder="Cover title (or leave blank for AI)..."
-                  disabled={isLoading}
-                />
-                <input
-                  type="text"
-                  className="studio-input"
-                  value={customSubtitle}
-                  onChange={(e) => setCustomSubtitle(e.target.value)}
-                  placeholder="Optional subtitle (e.g. SUMMER 2026)..."
-                  disabled={isLoading}
-                />
-              </div>
-            </div>
-
-            {/* Warm Sunlit Signature CTA Button */}
-            <div
-              style={{
-                marginTop: '1.15rem',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '1rem',
-                flexWrap: 'wrap'
-              }}
-            >
-              <button
-                type="button"
-                className="mx-btn-story-mode"
-                onClick={handleLaunchBookCreation}
-                disabled={isLoading || isWaitingForIngest || isDownsampling}
-              >
-                {isWaitingForIngest ? (
-                  <>
-                    <RefreshCw size={17} strokeWidth={2} className="animate-spin" />
-                    <span>Finishing photo upload...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles size={17} strokeWidth={2} />
-                    <span>Start creating my book</span>
-                  </>
-                )}
-              </button>
-
-              {totalCount > 0 && (
-                <span
-                  style={{
-                    fontSize: '0.82rem',
-                    color: 'var(--px-text-secondary)',
-                    fontWeight: 500
-                  }}
-                >
-                  {isPhotoUploadComplete
-                    ? `${survivedCount} curated photos ready`
-                    : `Uploading (${completedCount}/${totalCount}) — you can tap Start anytime`}
-                </span>
-              )}
+              </form>
             </div>
           </div>
-
-          <div ref={threadEndRef} />
         </div>
       )}
 
-      {/* =================================================================
-          STICKY BOTTOM WARM INPUT DOCK (Photos Pill + Input + Send Circle)
-          ================================================================= */}
-      <div className="mx-bottom-dock">
-        <div className="mx-bottom-dock-inner">
-          <button
-            type="button"
-            className="mx-photos-dock-btn"
-            onClick={() => {
-              if (totalCount > 0) {
-                setIsPhotoModalOpen(true);
-              } else {
-                triggerFilePicker();
-              }
-            }}
-            title="Upload or manage your book photos"
-          >
-            <ImageIcon size={17} strokeWidth={2} color="var(--px-brand-iris)" />
-            <span>Photos</span>
-            {totalCount > 0 && (
-              <span className="mx-photos-count-badge">
-                {isPhotoUploadComplete ? survivedCount : `${completedCount}/${totalCount}`}
-              </span>
-            )}
-          </button>
-
-          <form className="mx-input-pill-bar" onSubmit={handleSendMessage}>
-            <input
-              type="text"
-              className="mx-input-field"
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              placeholder={
-                hasStartedStory
-                  ? 'Add more story details or notes...'
-                  : 'Or tell us in your own words...'
-              }
-              disabled={isLoading}
-            />
+      {/* Screen 1 Sticky Bottom Input Dock (Only when user has not started story yet) */}
+      {!hasStartedStory && (
+        <div className="mx-bottom-dock">
+          <div className="mx-bottom-dock-inner">
             <button
-              type="submit"
-              className="mx-send-circle-btn"
-              disabled={!chatInput.trim() || isLoading}
-              aria-label="Send message"
+              type="button"
+              className="mx-photos-dock-btn"
+              onClick={() => {
+                if (totalCount > 0) {
+                  setIsPhotoModalOpen(true);
+                } else {
+                  triggerFilePicker();
+                }
+              }}
+              title="Upload or manage your book photos"
             >
-              <ArrowUp size={18} strokeWidth={2.5} />
+              <ImageIcon size={17} strokeWidth={2} color="var(--px-brand-iris)" />
+              <span>Photos</span>
+              {totalCount > 0 && (
+                <span className="mx-photos-count-badge">
+                  {isPhotoUploadComplete ? survivedCount : `${completedCount}/${totalCount}`}
+                </span>
+              )}
             </button>
-          </form>
+
+            <form className="mx-input-pill-bar" onSubmit={handleSendMessage}>
+              <input
+                type="text"
+                className="mx-input-field"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder="Or tell us in your own words..."
+                disabled={isLoading}
+              />
+              <button
+                type="submit"
+                className="mx-send-circle-btn"
+                disabled={!chatInput.trim() || isLoading}
+                aria-label="Send message"
+              >
+                <ArrowUp size={18} strokeWidth={2.5} />
+              </button>
+            </form>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* =================================================================
           PHOTO MANAGER DRAWER MODAL (When user taps "Photos")

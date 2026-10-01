@@ -292,8 +292,10 @@ body {
 }
 
 .main-wrapper--story {
-  max-width: 860px;
-  margin: clamp(0.75rem, 2.5vw, 1.75rem) auto;
+  max-width: 100%;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0;
 }
 
 .step-card {
@@ -2632,16 +2634,45 @@ input:focus-visible,
 .aspect-4\/3 { aspect-ratio: 4 / 3; }
 .object-cover { object-fit: cover; }
 
+.mx-hero-shell-wrap {
+  width: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
 .mx-hero-viewport {
   position: relative;
   width: 100%;
-  min-height: calc(100vh - 80px);
-  min-height: calc(100dvh - 80px);
+  min-height: calc(100vh - 64px);
+  min-height: calc(100dvh - 64px);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: clamp(1.5rem, 4vw, 3.5rem) clamp(1rem, 3vw, 2.5rem);
   overflow: hidden;
+  background: radial-gradient(ellipse at bottom, #1b2735 0%, #090a0f 100%);
+}
+
+.app-container:has(.mx-cosmic-story-shell) .toolbar-header,
+.app-container:has(.mx-hero-viewport) .toolbar-header {
+  background: rgba(9, 10, 15, 0.82);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+.app-container:has(.mx-cosmic-story-shell) .brand-logo,
+.app-container:has(.mx-hero-viewport) .brand-logo {
+  color: #ffffff;
+}
+.app-container:has(.mx-cosmic-story-shell) .brand-badge,
+.app-container:has(.mx-hero-viewport) .brand-badge {
+  background: rgba(11, 162, 141, 0.2);
+  border-color: rgba(11, 162, 141, 0.4);
+  color: #4BB8C4;
+}
+.app-container:has(.mx-cosmic-story-shell) .mx-header-close-btn,
+.app-container:has(.mx-hero-viewport) .mx-header-close-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
 }
 
 .mx-hero-centerpiece {
