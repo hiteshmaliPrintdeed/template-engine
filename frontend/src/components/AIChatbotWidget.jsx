@@ -6,6 +6,9 @@ import {
   Image as ImageIcon,
   Check,
   ArrowUp,
+  ArrowRight,
+  ArrowLeft,
+  MessageSquare,
   RefreshCw,
   Compass,
   Heart,
@@ -16,6 +19,7 @@ import {
   Plus,
   X
 } from 'lucide-react';
+import ParallaxHeroImages from './ui/ParallaxHeroImages';
 import PixovoClientDownsampler from '../utils/client_downsampler';
 import PhotoFrame from './PhotoFrame';
 import { useToast } from './Toast';
@@ -71,6 +75,18 @@ const OCCASION_CARDS = [
   }
 ];
 
+
+const CURATED_HERO_IMAGES = [
+  'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=600&q=80', // Tropical beach
+  'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=600&q=80', // Wedding flowers & couple
+  'https://images.unsplash.com/photo-1511895426328-dc8714191300?auto=format&fit=crop&w=600&q=80', // Warm family smiles
+  'https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=600&q=80', // Road trip journey
+  'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=600&q=80', // Mountain lake reflection
+  'https://images.unsplash.com/photo-1511285560929-80b456fea0bc?auto=format&fit=crop&w=600&q=80', // Love & holding hands
+  'https://images.unsplash.com/photo-1533105079780-92b9be482077?auto=format&fit=crop&w=600&q=80', // European historic street
+  'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&w=600&q=80', // Friends celebration
+];
+
 const FOLLOWUP_CHIPS = [
   'With family & kids',
   'With my partner',
@@ -117,6 +133,33 @@ export default function AIChatbotWidget({
   const [selectedTitleIdx, setSelectedTitleIdx] = useState(null);
   const [customTitle, setCustomTitle] = useState('');
   const [customSubtitle, setCustomSubtitle] = useState('');
+  const [heroStoryInput, setHeroStoryInput] = useState('');
+
+  const heroParallaxImages = useMemo(() => {
+    if (reconciledPhotos && reconciledPhotos.length > 0) {
+      const userUrls = reconciledPhotos.filter((p) => p.url).map((p) => p.url);
+      if (userUrls.length >= 8) return userUrls.slice(0, 8);
+      return [...userUrls, ...CURATED_HERO_IMAGES].slice(0, 8);
+    }
+    return CURATED_HERO_IMAGES;
+  }, [reconciledPhotos]);
+
+  const handleHeroStorySubmit = (e) => {
+    if (e) e.preventDefault();
+    const trimmed = heroStoryInput.trim();
+    if (!trimmed) return;
+
+    const userMsg = { id: `u-${Date.now()}`, role: 'user', text: trimmed };
+    const aiMsg = {
+      id: `a-${Date.now() + 1}`,
+      role: 'ai',
+      text: generateContextualReply(trimmed, 0)
+    };
+    const nextMsgs = [userMsg, aiMsg];
+    setMessages(nextMsgs);
+    setUserPrompt(trimmed);
+    setHeroStoryInput('');
+  };
   const [includeText, setIncludeText] = useState(true);
   // Opt-in, off by default: only when ticked are a few photos sent to Gemini.
   const [usePhotoVision, setUsePhotoVision] = useState(false);
@@ -426,7 +469,7 @@ export default function AIChatbotWidget({
 
   return (
     <div
-      className="mx-story-shell"
+      className={hasStartedStory ? "mx-story-shell" : "mx-hero-shell-wrap"}
       onDragEnter={handleDrag}
       onDragOver={handleDrag}
       onDragLeave={handleDrag}
@@ -444,98 +487,137 @@ export default function AIChatbotWidget({
       />
 
       {/* =================================================================
-          SCREEN 1: WARM STORY MODE WELCOME (Before Prompt or Photos)
+          SCREEN 1: PARALLAX HERO & DUAL ENTRY PATHWAYS
           ================================================================= */}
       {!hasStartedStory && (
-        <>
-          <div className="mx-welcome-hero">
+        <div className="mx-hero-viewport">
+          {/* Floating 3D Parallax Images that respond to mouse physics */}
+          <ParallaxHeroImages images={heroParallaxImages} />
+
+          {/* Elevated Pixovo Editorial Centerpiece */}
+          <div className="mx-hero-centerpiece">
             <span className="mx-welcome-eyebrow">
-              <Sparkles size={13} strokeWidth={2.2} />
-              <span>Welcome to Story Mode</span>
+              <Sparkles size={14} strokeWidth={2.2} />
+              <span>AI Photobook Creator • Made in USA</span>
             </span>
-            <h1 className="mx-welcome-title">What book are you creating today?</h1>
+
+            <h1 className="mx-welcome-title">
+              Create a Custom Photo Book Designed Automatically by AI.
+            </h1>
+
             <p className="mx-welcome-subtitle">
-              Pick a story theme below, describe your memories in your own words, or drop your photos right in.
+              Turn your cherished moments into a beautifully printed photobook. Tell us your story, or drop your photos right in to begin.
             </p>
-          </div>
 
-          <div className="mx-occasion-dock-section">
-            <div className="mx-occasion-grid">
-              {OCCASION_CARDS.map((card, idx) => {
-                const IconComponent = card.Icon;
-                const staggerClass = `warm-stagger-${Math.min(6, idx + 1)}`;
-                return (
-                  <button
-                    key={card.id}
-                    type="button"
-                    className={`mx-occasion-card ${staggerClass}`}
-                    onClick={() => handleStartWithOccasion(card)}
+            {/* DUAL PATHWAY SELECTOR */}
+            <div className="mx-hero-options-container">
+              {/* PATHWAY 1: TELL ME ABOUT YOUR STORY */}
+              <div className="mx-hero-path-card mx-hero-path-story">
+                <div className="mx-hero-path-header">
+                  <div
+                    className="mx-hero-path-icon"
+                    style={{ background: 'var(--px-brand-iris-subtle)', color: 'var(--px-brand-iris)' }}
                   >
-                    <div
-                      className="mx-occasion-thumb"
-                      style={{ background: card.gradient }}
+                    <MessageSquare size={20} strokeWidth={2.1} />
+                  </div>
+                  <div>
+                    <span
+                      className="mx-hero-path-badge"
+                      style={{ background: 'var(--px-brand-iris-subtle)', color: 'var(--px-brand-iris)' }}
                     >
-                      <IconComponent size={23} strokeWidth={1.9} color="#ffffff" />
-                    </div>
-                    <div className="mx-occasion-card-body">
-                      <span className="mx-occasion-card-title">{card.title}</span>
-                      <span className="mx-occasion-card-sub">{card.subtitle}</span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Warm Quick-Upload Banner right below Occasion Cards */}
-            <div
-              className="mx-inline-upload-card warm-stagger-6"
-              onClick={triggerFilePicker}
-              style={{
-                marginTop: '0.95rem',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '1rem',
-                flexWrap: 'wrap',
-                background: dragActive ? 'var(--px-brand-iris-subtle)' : 'rgba(255, 253, 249, 0.94)',
-                borderStyle: dragActive ? 'solid' : 'dashed',
-                borderColor: dragActive ? 'var(--px-brand-iris)' : 'var(--px-brand-iris-border)'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-                <div
-                  style={{
-                    width: '42px',
-                    height: '42px',
-                    borderRadius: '12px',
-                    background: 'var(--px-brand-iris-subtle)',
-                    border: '1px solid var(--px-brand-iris-border)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0
-                  }}
-                >
-                  <UploadCloud size={20} color="var(--px-brand-iris)" strokeWidth={1.9} />
+                      Option 1
+                    </span>
+                    <h3 className="mx-hero-path-title">Tell me about your story</h3>
+                  </div>
                 </div>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--px-text-primary)' }}>
-                    Have your photos ready? Start by selecting or dropping them here
+
+                <p className="mx-hero-path-desc">
+                  Describe your trip, loved ones, or memories in your own words. Our AI will craft personalized themes and chapter captions.
+                </p>
+
+                <form onSubmit={handleHeroStorySubmit} style={{ marginTop: 'auto' }}>
+                  <div className="mx-hero-prompt-bar">
+                    <input
+                      type="text"
+                      className="mx-hero-prompt-input"
+                      placeholder="e.g. Summer family road trip along the coast..."
+                      value={heroStoryInput}
+                      onChange={(e) => setHeroStoryInput(e.target.value)}
+                    />
+                    <button
+                      type="submit"
+                      className="mx-hero-prompt-btn"
+                      disabled={!heroStoryInput.trim()}
+                      aria-label="Start Story"
+                    >
+                      <span>Continue</span>
+                      <ArrowRight size={15} strokeWidth={2.5} />
+                    </button>
                   </div>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--px-text-muted)' }}>
-                    Supports 20 to 1,000 photos • Smart blur &amp; duplicate filtering
-                  </div>
+                </form>
+
+                <div className="mx-hero-chips-row">
+                  <span className="mx-hero-chips-label">Quick Ideas:</span>
+                  {OCCASION_CARDS.slice(0, 4).map((card) => (
+                    <button
+                      key={card.id}
+                      type="button"
+                      className="mx-hero-mini-chip"
+                      onClick={() => handleStartWithOccasion(card)}
+                    >
+                      {card.title}
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              <span className="mx-chip-btn" style={{ color: 'var(--px-brand-iris)', borderColor: 'var(--px-brand-iris-border)' }}>
-                <Plus size={14} style={{ marginRight: '4px' }} />
-                Select Photos
-              </span>
+              {/* OR DIVIDER */}
+              <div className="mx-hero-divider">
+                <div className="mx-hero-divider-line" />
+                <span className="mx-hero-divider-text">OR</span>
+                <div className="mx-hero-divider-line" />
+              </div>
+
+              {/* PATHWAY 2: DROP YOUR PHOTOS */}
+              <div
+                className={`mx-hero-path-card mx-hero-path-photos ${dragActive ? 'drag-active' : ''}`}
+                onClick={triggerFilePicker}
+              >
+                <div className="mx-hero-path-header">
+                  <div
+                    className="mx-hero-path-icon"
+                    style={{ background: '#EDF8FA', color: '#0BA28D' }}
+                  >
+                    <UploadCloud size={22} strokeWidth={2.1} />
+                  </div>
+                  <div>
+                    <span
+                      className="mx-hero-path-badge"
+                      style={{ background: '#EDF8FA', color: '#0BA28D' }}
+                    >
+                      Option 2
+                    </span>
+                    <h3 className="mx-hero-path-title">Drop your photos to begin</h3>
+                  </div>
+                </div>
+
+                <p className="mx-hero-path-desc">
+                  Already have photos ready? Drop them here to start instant quality filtering, duplicate removal, and layout synthesis.
+                </p>
+
+                <div className="mx-hero-drop-cta">
+                  <span className="mx-btn-story-mode" style={{ padding: '0.68rem 1.45rem', fontSize: '0.9rem' }}>
+                    <Plus size={16} strokeWidth={2.4} />
+                    <span>Select Photos (20–1,000)</span>
+                  </span>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--px-text-muted)' }}>
+                    Drop files anywhere • JPEG, PNG, WebP
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
-        </>
+        </div>
       )}
 
       {/* =================================================================
@@ -543,6 +625,26 @@ export default function AIChatbotWidget({
           ================================================================= */}
       {hasStartedStory && (
         <div className="mx-chat-thread">
+          {/* Top Stage Bar with Back to Home navigation */}
+          <div className="mx-chat-top-bar">
+            <button
+              type="button"
+              className="mx-chat-back-btn"
+              onClick={() => {
+                setMessages([]);
+                setHeroStoryInput('');
+              }}
+              title="Return to Story Mode Welcome Hero"
+            >
+              <ArrowLeft size={14} strokeWidth={2.4} />
+              <span>Back to Story Selector</span>
+            </button>
+            <span className="mx-chat-stage-pill">
+              <Sparkles size={11} strokeWidth={2.2} style={{ marginRight: '4px', verticalAlign: '-1px' }} />
+              Story Mode · Customizing
+            </span>
+          </div>
+
           {/* Render User & AI Conversation Turns */}
           {messages.map((msg, idx) => {
             if (msg.role === 'user') {
