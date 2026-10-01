@@ -92,7 +92,7 @@ html {
 
 body {
   font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  background: radial-gradient(circle at 50% 0%, #FFFFFF 0%, #F7F4F0 60%, #EFECE6 100%);
+  background-color: #F7F4F0;
   color: var(--px-text-primary);
   min-height: 100vh;
   min-height: 100dvh;
@@ -187,10 +187,8 @@ body {
 /* Header Navbar */
 .toolbar-header {
   height: 64px;
-  background: rgba(255, 253, 249, 0.88);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  border-bottom: 1px solid var(--px-border-light);
+  background: #F7F4F0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2653,23 +2651,19 @@ input:focus-visible,
   background: radial-gradient(ellipse at bottom, #1b2735 0%, #090a0f 100%);
 }
 
-.app-container:has(.mx-cosmic-story-shell) .toolbar-header,
-.app-container:has(.mx-hero-viewport) .toolbar-header {
+.app-container:has(.mx-cosmic-story-shell) .toolbar-header {
   background: rgba(9, 10, 15, 0.82);
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
-.app-container:has(.mx-cosmic-story-shell) .brand-logo,
-.app-container:has(.mx-hero-viewport) .brand-logo {
+.app-container:has(.mx-cosmic-story-shell) .brand-logo {
   color: #ffffff;
 }
-.app-container:has(.mx-cosmic-story-shell) .brand-badge,
-.app-container:has(.mx-hero-viewport) .brand-badge {
+.app-container:has(.mx-cosmic-story-shell) .brand-badge {
   background: rgba(11, 162, 141, 0.2);
   border-color: rgba(11, 162, 141, 0.4);
   color: #4BB8C4;
 }
-.app-container:has(.mx-cosmic-story-shell) .mx-header-close-btn,
-.app-container:has(.mx-hero-viewport) .mx-header-close-btn {
+.app-container:has(.mx-cosmic-story-shell) .mx-header-close-btn {
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.18);
   color: #ffffff;

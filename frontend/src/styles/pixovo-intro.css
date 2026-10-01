@@ -1,0 +1,432 @@
+/* ==========================================================================
+   PIXOVO STORY MODE — CEREMONIAL BALLOON INTRO & CLEAN HEARTFELT INTERFACE
+   ========================================================================== */
+
+/* Main Container: Plain Alabaster Background from User Color Swatch (#F7F4F0) */
+.pixovo-intro-container {
+  position: relative;
+  width: 100%;
+  min-height: calc(100vh - 64px);
+  min-height: calc(100dvh - 64px);
+  background-color: #F7F4F0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Skip Intro Button in Top-Right Corner */
+.pixovo-intro-skip-btn {
+  position: absolute;
+  top: 1.25rem;
+  right: 1.5rem;
+  z-index: 50;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 999px;
+  padding: 0.35rem 0.95rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #7E8D9E;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pixovo-intro-skip-btn:hover {
+  background: #ffffff;
+  color: #0BA28D;
+  border-color: #0BA28D;
+  transform: translateY(-1px);
+}
+
+/* ==========================================================================
+   PHASE 1: "PIXOVO STORY MODE" TITLE DISSOLVE ANIMATION
+   ========================================================================== */
+
+.pixovo-intro-title-wrapper {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  z-index: 30;
+  pointer-events: none;
+  padding: 2rem;
+}
+
+.pixovo-intro-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: rgba(11, 162, 141, 0.1);
+  color: #0BA28D;
+  border: 1px solid rgba(11, 162, 141, 0.22);
+  border-radius: 999px;
+  padding: 0.35rem 0.95rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 1rem;
+}
+
+.pixovo-intro-title {
+  font-family: 'Playfair Display', 'Outfit', serif;
+  font-size: clamp(2.4rem, 6vw, 4.2rem);
+  font-weight: 700;
+  color: #1F2937;
+  letter-spacing: -0.03em;
+  line-height: 1.12;
+}
+
+/* ==========================================================================
+   PHASE 2: CEREMONIAL BALLOON PHOTOS FLYING UP & DISSOLVING
+   ========================================================================== */
+
+.pixovo-balloon-stage {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 15;
+}
+
+.pixovo-balloon-photo {
+  position: absolute;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+.pixovo-balloon-polaroid {
+  background: #ffffff;
+  padding: 7px 7px 18px 7px;
+  border-radius: 14px;
+  box-shadow: 
+    0 18px 40px rgba(0, 0, 0, 0.12),
+    0 4px 12px rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  transition: transform 0.2s ease;
+}
+
+.pixovo-balloon-img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 9px;
+  display: block;
+}
+
+/* ==========================================================================
+   PHASE 3: CLEAN, HEARTFELT INTERFACE
+   ========================================================================== */
+
+.pixovo-clean-welcome {
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: clamp(1.5rem, 4vw, 3.25rem) clamp(1rem, 3.5vw, 2.5rem) 3.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  position: relative;
+  z-index: 25;
+}
+
+/* Minimal Header Bar */
+.pixovo-clean-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 1.85rem;
+}
+
+.pixovo-clean-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-family: 'Playfair Display', serif;
+  font-size: 1.45rem;
+  font-weight: 700;
+  color: #1F2937;
+  letter-spacing: -0.02em;
+}
+
+.pixovo-heart-icon {
+  color: #0BA28D;
+}
+
+.pixovo-clean-subline {
+  font-size: 0.86rem;
+  font-weight: 500;
+  color: #7E8D9E;
+  letter-spacing: 0.02em;
+}
+
+/* Single Heartfelt Headline */
+.pixovo-clean-title {
+  font-family: 'Playfair Display', 'Outfit', serif;
+  font-size: clamp(2.2rem, 4.6vw, 3.2rem);
+  font-weight: 700;
+  color: #1F2937;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+  margin-bottom: 2.75rem;
+  max-width: 680px;
+}
+
+/* 4 Curated Occasion Cards Grid */
+.pixovo-clean-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: clamp(0.75rem, 1.8vw, 1.25rem);
+  width: 100%;
+  max-width: 820px;
+  margin-bottom: 2.85rem;
+}
+
+.pixovo-clean-card {
+  background: #ffffff;
+  border-radius: 20px;
+  padding: 0.7rem 0.7rem 1.05rem;
+  border: 1.5px solid transparent;
+  box-shadow: 
+    0 8px 24px rgba(0, 0, 0, 0.05),
+    0 2px 6px rgba(0, 0, 0, 0.02);
+  cursor: pointer;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.25s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.pixovo-clean-card:hover {
+  transform: translateY(-5px);
+  border-color: rgba(11, 162, 141, 0.45);
+  box-shadow: 
+    0 16px 36px rgba(11, 162, 141, 0.15),
+    0 4px 12px rgba(0, 0, 0, 0.04);
+}
+
+.pixovo-clean-card-img-wrap {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 14px;
+  overflow: hidden;
+  margin-bottom: 0.65rem;
+  background: #EFECE6;
+}
+
+.pixovo-clean-card-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.35s ease;
+}
+
+.pixovo-clean-card:hover .pixovo-clean-card-img {
+  transform: scale(1.05);
+}
+
+.pixovo-clean-card-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #1F2937;
+  line-height: 1.3;
+  font-family: inherit;
+}
+
+/* ==========================================================================
+   ALMOST NO-BOUNDARY FLOATING BOTTOM INPUT SLOT WITH AMBIENT GLOW
+   ========================================================================== */
+
+.pixovo-clean-bottom-dock {
+  position: relative;
+  width: 100%;
+  max-width: 660px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: center;
+}
+
+/* Atmospheric Ambient Diffuse Halo underneath bottom input */
+.pixovo-clean-dock-glow {
+  position: absolute;
+  inset: -14px -18px;
+  border-radius: 999px;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(11, 162, 141, 0.32) 0%,
+    rgba(75, 184, 196, 0.24) 35%,
+    rgba(217, 138, 134, 0.18) 70%,
+    transparent 100%
+  );
+  filter: blur(24px);
+  pointer-events: none;
+  z-index: 0;
+  animation: cleanGlowPulse 4s ease-in-out infinite alternate;
+}
+
+@keyframes cleanGlowPulse {
+  0% {
+    opacity: 0.75;
+    transform: scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1.02);
+  }
+}
+
+/* Minimal "Almost No Boundary" Input Bar */
+.pixovo-clean-input-bar {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  background: #ffffff;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  box-shadow: 
+    0 12px 32px rgba(0, 0, 0, 0.06),
+    0 2px 8px rgba(0, 0, 0, 0.02);
+  padding: 0.42rem 0.5rem 0.42rem 1.15rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  transition: all 0.25s ease;
+}
+
+.pixovo-clean-input-bar:focus-within {
+  border-color: rgba(11, 162, 141, 0.4);
+  box-shadow: 
+    0 16px 42px rgba(11, 162, 141, 0.2),
+    0 2px 10px rgba(0, 0, 0, 0.04);
+}
+
+.pixovo-clean-photo-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: rgba(11, 162, 141, 0.08);
+  color: #0BA28D;
+  border: 1px solid rgba(11, 162, 141, 0.22);
+  border-radius: 999px;
+  padding: 0.42rem 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.pixovo-clean-photo-btn:hover {
+  background: rgba(11, 162, 141, 0.16);
+  border-color: #0BA28D;
+  transform: translateY(-1px);
+}
+
+.pixovo-clean-input {
+  flex: 1;
+  border: none !important;
+  outline: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-size: 0.98rem;
+  color: #1F2937;
+  font-family: inherit;
+  min-width: 0;
+}
+
+.pixovo-clean-input::placeholder {
+  color: #9CA3AF;
+  font-weight: 400;
+}
+
+.pixovo-clean-send-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #0BA28D 0%, #4BB8C4 100%);
+  color: #ffffff;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease;
+  box-shadow: 0 4px 12px rgba(11, 162, 141, 0.35);
+}
+
+.pixovo-clean-send-btn:hover:not(:disabled) {
+  transform: scale(1.08);
+  box-shadow: 0 6px 18px rgba(11, 162, 141, 0.55);
+}
+
+.pixovo-clean-send-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Drag overlay when hovering photos over welcome screen */
+.pixovo-clean-drag-overlay {
+  position: absolute;
+  inset: 1rem;
+  border-radius: 24px;
+  border: 2px dashed #0BA28D;
+  background: rgba(232, 246, 244, 0.9);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.85rem;
+  z-index: 100;
+  pointer-events: none;
+  animation: pxSlideFade 0.25s ease-out both;
+}
+
+.pixovo-clean-drag-text {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #0BA28D;
+}
+
+/* ==========================================================================
+   RESPONSIVE DESIGN BREAKPOINTS
+   ========================================================================== */
+
+@media (max-width: 780px) {
+  .pixovo-clean-cards-grid {
+    grid-template-columns: repeat(2, 1fr);
+    max-width: 440px;
+    gap: 0.85rem;
+  }
+  .pixovo-clean-title {
+    margin-bottom: 2rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .pixovo-clean-cards-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.65rem;
+  }
+  .pixovo-clean-welcome {
+    padding: 1.25rem 1rem 2.5rem;
+  }
+  .pixovo-clean-photo-btn span {
+    display: none;
+  }
+}

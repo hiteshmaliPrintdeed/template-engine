@@ -20,6 +20,7 @@ import {
   X
 } from 'lucide-react';
 import ParallaxHeroImages from './ui/ParallaxHeroImages';
+import PixovoStoryIntro from './PixovoStoryIntro';
 import PixovoClientDownsampler from '../utils/client_downsampler';
 import PhotoFrame from './PhotoFrame';
 import { useToast } from './Toast';
@@ -488,144 +489,26 @@ export default function AIChatbotWidget({
       />
 
       {/* =================================================================
-          SCREEN 1: PARALLAX HERO & DUAL ENTRY PATHWAYS
+          SCREEN 1: CEREMONIAL INTRO & CLEAN HEARTFELT INTERFACE
           ================================================================= */}
       {!hasStartedStory && (
-        <div className="mx-hero-viewport">
-          {/* Uiverse Cosmic Starfield Background */}
-          <div className="cosmic-container">
-            <div id="stars" />
-            <div id="stars2" />
-            <div id="stars3" />
-          </div>
-
-          {/* Floating 3D Parallax Images that respond to mouse physics */}
-          <ParallaxHeroImages images={heroParallaxImages} />
-
-          {/* Elevated Pixovo Editorial Centerpiece */}
-          <div className="mx-hero-centerpiece">
-            <span className="mx-welcome-eyebrow">
-              <Sparkles size={14} strokeWidth={2.2} />
-              <span>AI Photobook Creator • Made in USA</span>
-            </span>
-
-            <h1 className="mx-welcome-title">
-              Create a Custom Photo Book Designed Automatically by AI.
-            </h1>
-
-            <p className="mx-welcome-subtitle">
-              Turn your cherished moments into a beautifully printed photobook. Tell us your story, or drop your photos right in to begin.
-            </p>
-
-            {/* DUAL PATHWAY SELECTOR */}
-            <div className="mx-hero-options-container">
-              {/* PATHWAY 1: TELL ME ABOUT YOUR STORY */}
-              <div className="mx-hero-path-card mx-hero-path-story">
-                <div className="mx-hero-path-header">
-                  <div
-                    className="mx-hero-path-icon"
-                    style={{ background: 'var(--px-brand-iris-subtle)', color: 'var(--px-brand-iris)' }}
-                  >
-                    <MessageSquare size={20} strokeWidth={2.1} />
-                  </div>
-                  <div>
-                    <span
-                      className="mx-hero-path-badge"
-                      style={{ background: 'var(--px-brand-iris-subtle)', color: 'var(--px-brand-iris)' }}
-                    >
-                      Option 1
-                    </span>
-                    <h3 className="mx-hero-path-title">Tell me about your story</h3>
-                  </div>
-                </div>
-
-                <p className="mx-hero-path-desc">
-                  Describe your trip, loved ones, or memories in your own words. Our AI will craft personalized themes and chapter captions.
-                </p>
-
-                <form onSubmit={handleHeroStorySubmit} style={{ marginTop: 'auto' }}>
-                  <div className="mx-hero-prompt-bar">
-                    <input
-                      type="text"
-                      className="mx-hero-prompt-input"
-                      placeholder="e.g. Summer family road trip along the coast..."
-                      value={heroStoryInput}
-                      onChange={(e) => setHeroStoryInput(e.target.value)}
-                    />
-                    <button
-                      type="submit"
-                      className="mx-hero-prompt-btn"
-                      disabled={!heroStoryInput.trim()}
-                      aria-label="Start Story"
-                    >
-                      <span>Continue</span>
-                      <ArrowRight size={15} strokeWidth={2.5} />
-                    </button>
-                  </div>
-                </form>
-
-                <div className="mx-hero-chips-row">
-                  <span className="mx-hero-chips-label">Quick Ideas:</span>
-                  {OCCASION_CARDS.slice(0, 4).map((card) => (
-                    <button
-                      key={card.id}
-                      type="button"
-                      className="mx-hero-mini-chip"
-                      onClick={() => handleStartWithOccasion(card)}
-                    >
-                      {card.title}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* OR DIVIDER */}
-              <div className="mx-hero-divider">
-                <div className="mx-hero-divider-line" />
-                <span className="mx-hero-divider-text">OR</span>
-                <div className="mx-hero-divider-line" />
-              </div>
-
-              {/* PATHWAY 2: DROP YOUR PHOTOS */}
-              <div
-                className={`mx-hero-path-card mx-hero-path-photos ${dragActive ? 'drag-active' : ''}`}
-                onClick={triggerFilePicker}
-              >
-                <div className="mx-hero-path-header">
-                  <div
-                    className="mx-hero-path-icon"
-                    style={{ background: '#EDF8FA', color: '#0BA28D' }}
-                  >
-                    <UploadCloud size={22} strokeWidth={2.1} />
-                  </div>
-                  <div>
-                    <span
-                      className="mx-hero-path-badge"
-                      style={{ background: '#EDF8FA', color: '#0BA28D' }}
-                    >
-                      Option 2
-                    </span>
-                    <h3 className="mx-hero-path-title">Drop your photos to begin</h3>
-                  </div>
-                </div>
-
-                <p className="mx-hero-path-desc">
-                  Already have photos ready? Drop them here to start instant quality filtering, duplicate removal, and layout synthesis.
-                </p>
-
-                <div className="mx-hero-drop-cta">
-                  <span className="mx-btn-story-mode" style={{ padding: '0.68rem 1.45rem', fontSize: '0.9rem' }}>
-                    <Plus size={16} strokeWidth={2.4} />
-                    <span>Select Photos (20–1,000)</span>
-                  </span>
-                  <span style={{ fontSize: '0.78rem', color: 'var(--px-text-muted)' }}>
-                    Drop files anywhere • JPEG, PNG, WebP
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <PixovoStoryIntro
+          onSelectOccasion={handleStartWithOccasion}
+          onStorySubmit={(text) => {
+            const userMsg = { id: `u-${Date.now()}`, role: 'user', text };
+            const aiMsg = {
+              id: `a-${Date.now() + 1}`,
+              role: 'ai',
+              text: generateContextualReply(text, 0)
+            };
+            const nextMsgs = [userMsg, aiMsg];
+            setMessages(nextMsgs);
+            setUserPrompt(text);
+          }}
+          onTriggerFilePicker={triggerFilePicker}
+          dragActive={dragActive}
+          isLoading={isLoading}
+        />
       )}
 
       {/* =================================================================
@@ -1279,52 +1162,7 @@ export default function AIChatbotWidget({
         </div>
       )}
 
-      {/* Screen 1 Sticky Bottom Input Dock (Only when user has not started story yet) */}
-      {!hasStartedStory && (
-        <div className="mx-bottom-dock">
-          <div className="mx-bottom-dock-inner">
-            <button
-              type="button"
-              className="mx-photos-dock-btn"
-              onClick={() => {
-                if (totalCount > 0) {
-                  setIsPhotoModalOpen(true);
-                } else {
-                  triggerFilePicker();
-                }
-              }}
-              title="Upload or manage your book photos"
-            >
-              <ImageIcon size={17} strokeWidth={2} color="var(--px-brand-iris)" />
-              <span>Photos</span>
-              {totalCount > 0 && (
-                <span className="mx-photos-count-badge">
-                  {isPhotoUploadComplete ? survivedCount : `${completedCount}/${totalCount}`}
-                </span>
-              )}
-            </button>
 
-            <form className="mx-input-pill-bar" onSubmit={handleSendMessage}>
-              <input
-                type="text"
-                className="mx-input-field"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Or tell us in your own words..."
-                disabled={isLoading}
-              />
-              <button
-                type="submit"
-                className="mx-send-circle-btn"
-                disabled={!chatInput.trim() || isLoading}
-                aria-label="Send message"
-              >
-                <ArrowUp size={18} strokeWidth={2.5} />
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* =================================================================
           PHOTO MANAGER DRAWER MODAL (When user taps "Photos")
