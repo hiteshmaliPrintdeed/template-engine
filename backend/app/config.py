@@ -19,6 +19,22 @@ elif ROOT_ENV.exists():
 else:
     load_dotenv()
 
+# ----------------------------------------------------------------------
+# Quiet logs (local development)
+# ----------------------------------------------------------------------
+# PIXOVO_QUIET_LOGS=1 in a local backend/.env keeps the console readable for
+# print() debugging: loguru's console drops to WARNING+ and uvicorn's
+# per-request access log goes quiet. The log files are unaffected. Off by
+# default, so servers and CI log exactly as before.
+#
+# Not covered: MediaPipe's three native lines at startup ("Created TensorFlow
+# Lite XNNPACK delegate", "Logging before InitGoogle()", "W0000 ...
+# inference_feedback_manager"). This build logs through C++ absl, which ignores
+# GLOG_minloglevel and TF_CPP_MIN_LOG_LEVEL -- both were tried and verified to
+# change nothing -- and they bypass Python entirely.
+_quiet_raw = os.environ.get("PIXOVO_QUIET_LOGS", "")
+QUIET_LOGS = _quiet_raw.strip().lower() in ("1", "true", "yes", "on")
+
 # Upload Directories (Unified Dual-Asset Pipeline: Originals vs Thumbnails)
 # [PRODUCTION SPEC]:
 # - Originals: 300 DPI Print production assets
@@ -104,6 +120,57 @@ def _env_bool(name: str, default: bool) -> bool:
     if raw is None or not raw.strip():
         return default
     return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw.strip())
+    except ValueError:
+        raise RuntimeError(
+            f"{name} must be a number, got {raw!r}. "
+            f"Leave it empty to use the default ({default})."
+        ) from None
+
+# ----------------------------------------------------------------------
+# Story AI (Gemini)
+# ----------------------------------------------------------------------
+# Per-request HTTP timeouts, enforced by the SDK itself rather than by a thread
+# wrapper -- a wrapper can report a timeout but cannot stop the call it is
+# waiting on. The book call backs the interactive chat widget, so it is short;
+# the chapter call runs inside the async generate job, which already shows a
+# progress bar, and asks for far more output.
+GEMINI_TIMEOUT_SEC = _env_float("PIXOVO_GEMINI_TIMEOUT_SEC", 8.0)
+GEMINI_CHAPTER_TIMEOUT_SEC = _env_float("PIXOVO_GEMINI_CHAPTER_TIMEOUT_SEC", 20.0)
+
+# Per-chapter captions from Gemini. Off restores book-level captions (one pool
+# per variation) without a redeploy. Has no effect when GEMINI_API_KEY is unset.
+# Kept as an alias: PIXOVO_CHAPTER_CAPTIONS=0 means CAPTION_STRATEGY=generic.
+CHAPTER_CAPTIONS_ENABLED = _env_bool("PIXOVO_CHAPTER_CAPTIONS", True)
+
+# How story segments get their captions:
+#   generic -- book-level caption pools only, no chapter call
+#   chapter -- one text-only Gemini call from per-segment facts
+#   vision  -- Gemini also SEES ~3 representative thumbnails per segment, but
+#              only for books whose user opted in (use_photo_vision); every
+#              other book uses 'chapter'. The opt-in, not this setting, is what
+#              sends photos to Google.
+CAPTION_STRATEGIES = ("generic", "chapter", "vision")
+CAPTION_STRATEGY = _env_str("PIXOVO_CAPTION_STRATEGY", "vision").lower()
+if CAPTION_STRATEGY not in CAPTION_STRATEGIES:
+    raise RuntimeError(
+        f"PIXOVO_CAPTION_STRATEGY must be one of {', '.join(CAPTION_STRATEGIES)}, "
+        f"got {CAPTION_STRATEGY!r}. Leave it empty for the default (vision)."
+    )
+if not CHAPTER_CAPTIONS_ENABLED:
+    CAPTION_STRATEGY = "generic"
+
+# Total wall-clock allowance for one book's vision pass. Segments not captioned
+# by then use text-only chapter captions for this generation; calls already in
+# flight still finish and cache their result for the next generate.
+GEMINI_VISION_BUDGET_SEC = _env_float("PIXOVO_GEMINI_VISION_BUDGET_SEC", 45.0)
 
 # ----------------------------------------------------------------------
 # Ingestion limits (Stage 1.1)
@@ -310,13 +377,34 @@ def publish_export(staging_path: Path, session_id: str, filename: str) -> str:
 # Configure Loguru Logger for metrics, stats, and session logging
 logger.remove() # Remove default handler
 
-# 1. Console Output (Colorized DEBUG)
-logger.add(
-    sys.stdout,
-    format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level:7}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-    level="DEBUG",
-    colorize=True
-)
+_LOG_LEVELS = ("TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL", "OFF")
+
+
+def _console_log_level() -> str:
+    """
+    PIXOVO_LOG_CONSOLE_LEVEL wins when set; otherwise WARNING in quiet mode and
+    DEBUG (the long-standing default) otherwise. OFF removes the console sink.
+    Only the console is affected -- the file sinks below always record DEBUG.
+    """
+    raw = _env_str("PIXOVO_LOG_CONSOLE_LEVEL", "").upper()
+    if raw and raw not in _LOG_LEVELS:
+        raise RuntimeError(
+            f"PIXOVO_LOG_CONSOLE_LEVEL must be one of {', '.join(_LOG_LEVELS)}, got {raw!r}. "
+            f"Leave it empty for the default."
+        )
+    return raw or ("WARNING" if QUIET_LOGS else "DEBUG")
+
+
+CONSOLE_LOG_LEVEL = _console_log_level()
+
+# 1. Console Output (Colorized; DEBUG unless quieted)
+if CONSOLE_LOG_LEVEL != "OFF":
+    logger.add(
+        sys.stdout,
+        format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level:7}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+        level=CONSOLE_LOG_LEVEL,
+        colorize=True
+    )
 
 # 2. Cumulative Rotating Log File
 CUMULATIVE_LOG_FILE = LOGS_DIR / "backend_metrics.log"
@@ -334,6 +422,23 @@ logger.add(
     format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:7} | {name}:{function}:{line} - {message}",
     level="DEBUG"
 )
+
+if QUIET_LOGS:
+    import logging
+    # Uvicorn configures its loggers before importing the app -- in the --reload
+    # worker process too -- so raising the level here, at app import, sticks.
+    # Doing it in the app rather than with --no-access-log makes it work however
+    # the server is launched. uvicorn.error (startup, reloads, crashed-request
+    # tracebacks) is left alone: that is the channel that reports failures.
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    # One line, so a quiet terminal is explained rather than mysterious. Not a
+    # logger call: it is not a warning, and the console filters out anything less.
+    print(
+        f"[Pixovo] Quiet logs: console shows {CONSOLE_LOG_LEVEL}+ only. "
+        f"Full log: logs/{SESSION_LOG_FILE.name}",
+        file=sys.stderr,
+        flush=True,
+    )
 
 logger.info(f"[Config] New backend session started. Log file: logs/{SESSION_LOG_FILE.name}")
 logger.info(f"[Config] Environment loaded. GEMINI_API_KEY present: {bool(GEMINI_API_KEY)}")

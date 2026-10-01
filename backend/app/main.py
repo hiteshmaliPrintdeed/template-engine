@@ -12,6 +12,7 @@ import json
 import asyncio
 import shutil
 import secrets
+from functools import partial
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -50,7 +51,8 @@ from cachetools import TTLCache
 from app.db.session_store import SessionStore
 from app.engine.color_extractor import extract_dominant_colors, THEME_PALETTES
 from app.engine.cover_selector import COVER_STYLES
-from app.engine.story_ai import generate_story_theme_batch, suggest_creative_titles
+from app.engine.story_ai import batch_for_reshuffle, generate_story_theme_batch, suggest_creative_titles
+from app.engine.story_content import build_story_context
 from app.engine.solver import generate_photobook_variations_engine
 from app.engine.pdf_exporter import generate_print_pdf_engine
 from app.progress import progress_bus
@@ -805,18 +807,17 @@ def reshuffle_job_variations(req: VariationsReshuffleRequest):
     # from SessionStore so reshuffling a Photo-Only book stays caption-free.
     prefs = SessionStore.get_session_preferences(session_id=req.session_id, job_id=req.job_id)
 
-    ai_batch_result = {
-        "variations": [
-            {
-                "variation_id": f"var_{i+1}",
-                "variation_title": v.variation_title,
-                "theme_name": v.theme_name,
-                "cover_title": v.cover_title,
-                "cover_subtitle": v.cover_subtitle,
-            }
-            for i, v in enumerate(job.result.variations)
-        ]
-    }
+    # Rebuilt WITH the job's captions (and chapter content): rebuilding from
+    # job.result alone carried none, so every reshuffle replaced the book's
+    # captions with the solver's hardcoded defaults.
+    ai_batch_result, story_context = batch_for_reshuffle(
+        req.session_id,
+        SessionStore.get_job_prompt(req.job_id),
+        job.result.variations,
+        photos,
+        include_text=prefs["include_text"],
+        caption_strategy=SessionStore.get_job_caption_strategy(req.job_id),
+    )
 
     new_variations = generate_photobook_variations_engine(
         photos,
@@ -825,6 +826,7 @@ def reshuffle_job_variations(req: VariationsReshuffleRequest):
         custom_title=prefs["custom_title"],
         include_text=prefs["include_text"],
         subtitle=prefs["subtitle"],
+        story_context=story_context,
     )
     job.result.variations = new_variations
     # Persist, so a reshuffle survives a cache eviction or restart.
@@ -1632,6 +1634,7 @@ async def process_async_job(
     custom_title: Optional[str] = None,
     include_text: bool = True,
     subtitle: Optional[str] = None,
+    use_photo_vision: bool = False,
 ):
     """
     Background worker, bounded by CONCURRENCY_SEMAPHORE.
@@ -1680,19 +1683,29 @@ async def process_async_job(
                 return
 
             _update_job(
-                job_id, 45, "Choosing your three styles...",
+                job_id, 45, "Generating story themes...",
                 session_id=session_id, phase="themes",
                 detail={"photo_count": len(photos)},
             )
+            # Partition ONCE. The chapter captions are written for these
+            # chapters and the solver lays out these chapters; building the
+            # context separately in each would let the two drift apart.
+            story_context = await loop.run_in_executor(
+                CPU_WORKER_POOL, build_story_context, user_prompt, photos
+            )
             ai_batch = await loop.run_in_executor(
                 CPU_WORKER_POOL,
-                generate_story_theme_batch,
-                user_prompt,
-                len(photos),
-                session_id,
-                custom_title,
-                include_text,
-                subtitle,
+                partial(
+                    generate_story_theme_batch,
+                    user_prompt,
+                    len(photos),
+                    session_id,
+                    custom_title,
+                    include_text,
+                    subtitle,
+                    story_context=story_context,
+                    use_photo_vision=use_photo_vision,
+                ),
             )
 
             themes_preview = _build_themes_preview(ai_batch, custom_title, subtitle)
@@ -1724,14 +1737,17 @@ async def process_async_job(
 
             variations = await loop.run_in_executor(
                 CPU_WORKER_POOL,
-                generate_photobook_variations_engine,
-                photos,
-                ai_batch,
-                0,
-                custom_title,
-                include_text,
-                subtitle,
-                progress_cb,
+                partial(
+                    generate_photobook_variations_engine,
+                    photos,
+                    ai_batch,
+                    0,
+                    custom_title,
+                    include_text,
+                    subtitle,
+                    story_context=story_context,
+                    on_progress=progress_cb,
+                ),
             )
 
             if not variations:
@@ -1798,6 +1814,8 @@ async def generate_async(payload: GenerateVariationsRequest, background_tasks: B
         custom_title=payload.custom_title,
         include_text=payload.include_text,
         subtitle=payload.subtitle,
+        user_prompt=payload.user_prompt,
+        caption_strategy="vision" if payload.use_photo_vision else "chapter",
     )
     progress_bus.publish(job_id, {
         "job_id": job_id,
@@ -1816,6 +1834,7 @@ async def generate_async(payload: GenerateVariationsRequest, background_tasks: B
         payload.custom_title,
         payload.include_text,
         payload.subtitle,
+        payload.use_photo_vision,
     )
 
     return initial_job

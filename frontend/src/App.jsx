@@ -63,7 +63,8 @@ function AppContent() {
   const [studioPrefs, setStudioPrefs] = useState({
     custom_title: null,
     include_text: true,
-    subtitle: null
+    subtitle: null,
+    use_photo_vision: false
   });
   const [currentJobId, setCurrentJobId] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -689,7 +690,8 @@ function AppContent() {
     const nextPrefs = {
       custom_title: options.custom_title !== undefined ? options.custom_title : studioPrefs.custom_title,
       include_text: options.include_text !== undefined ? options.include_text : studioPrefs.include_text,
-      subtitle: options.subtitle !== undefined ? options.subtitle : studioPrefs.subtitle
+      subtitle: options.subtitle !== undefined ? options.subtitle : studioPrefs.subtitle,
+      use_photo_vision: options.use_photo_vision !== undefined ? options.use_photo_vision : studioPrefs.use_photo_vision
     };
     setStudioPrefs(nextPrefs);
 
@@ -712,7 +714,8 @@ function AppContent() {
           session_id: sessionIdRef.current,
           custom_title: nextPrefs.custom_title,
           include_text: nextPrefs.include_text,
-          subtitle: nextPrefs.subtitle
+          subtitle: nextPrefs.subtitle,
+          use_photo_vision: nextPrefs.use_photo_vision
         })
       });
 
@@ -937,7 +940,7 @@ function AppContent() {
     setJobStatus('idle');
     setJobMessage('');
     setUserPrompt('');
-    setStudioPrefs({ custom_title: null, include_text: true, subtitle: null });
+    setStudioPrefs({ custom_title: null, include_text: true, subtitle: null, use_photo_vision: false });
     setIsLoading(false);
     setIsExportingPDF(false);
     setIsReshufflingVars(false);

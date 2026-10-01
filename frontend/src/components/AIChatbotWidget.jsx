@@ -118,6 +118,8 @@ export default function AIChatbotWidget({
   const [customTitle, setCustomTitle] = useState('');
   const [customSubtitle, setCustomSubtitle] = useState('');
   const [includeText, setIncludeText] = useState(true);
+  // Opt-in, off by default: only when ticked are a few photos sent to Gemini.
+  const [usePhotoVision, setUsePhotoVision] = useState(false);
 
   // Local worker downsampling states
   const [isDownsampling, setIsDownsampling] = useState(false);
@@ -393,7 +395,9 @@ export default function AIChatbotWidget({
     onGenerate(effectivePrompt, {
       custom_title: customTitle.trim() || null,
       include_text: includeText,
-      subtitle: customSubtitle.trim() || null
+      subtitle: customSubtitle.trim() || null,
+      // Meaningless without captions, so never sent as true for photo-only books.
+      use_photo_vision: includeText && usePhotoVision
     });
   };
 
@@ -773,6 +777,38 @@ export default function AIChatbotWidget({
                 </div>
               </button>
             </div>
+
+            {includeText && (
+              <label
+                className="studio-vision-optin"
+                style={{
+                  display: 'flex',
+                  gap: '10px',
+                  alignItems: 'flex-start',
+                  marginTop: '0.75rem',
+                  padding: '0.75rem 1rem',
+                  background: 'rgba(255, 255, 255, 0.7)',
+                  border: '1px solid var(--px-border-light)',
+                  borderRadius: '12px',
+                  cursor: isLoading ? 'default' : 'pointer'
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={usePhotoVision}
+                  onChange={(e) => setUsePhotoVision(e.target.checked)}
+                  disabled={isLoading}
+                  style={{ marginTop: '3px', accentColor: 'var(--px-brand-iris)' }}
+                />
+                <span style={{ fontSize: '0.85rem', color: 'var(--px-text-primary)' }}>
+                  <strong>Let AI look at a few of my photos to write captions</strong>
+                  <br />
+                  <small style={{ color: 'var(--px-text-secondary)', fontSize: '0.78rem' }}>
+                    About 3 photos per chapter are sent to Google Gemini. Off by default.
+                  </small>
+                </span>
+              </label>
+            )}
 
             {/* Optional AI Cover Title Card */}
             <div

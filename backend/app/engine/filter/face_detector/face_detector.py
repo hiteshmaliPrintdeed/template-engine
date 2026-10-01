@@ -18,7 +18,7 @@ from dataclasses import dataclass, asdict
 from typing import List, Dict, Any, Tuple, Optional
 import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 
 # ---------------------------------------------------------------------------
 # Dynamic Backend Imports & Initialization
@@ -36,6 +36,52 @@ try:
         MEDIAPIPE_AVAILABLE = True
 except Exception:
     MEDIAPIPE_AVAILABLE = False
+
+
+# ---------------------------------------------------------------------------
+# MediaPipe detector lifetime
+# ---------------------------------------------------------------------------
+# MediaPipe's FaceDetector.__del__ calls close(), which dispatches through
+# MediaPipe's own executor and waits on the result. If the garbage collector
+# finalizes a detector at the wrong moment -- measured: pytest's end-of-session
+# gc pass -- that wait never returns and the process hangs. The app holds one
+# detector per worker thread for the life of the process, so a server shutdown
+# or --reload restart is exposed to the same hang.
+#
+# So no live detector is ever left for the collector: every one is referenced
+# here, and all are closed in a threading exit hook. Those hooks run BEFORE
+# concurrent.futures shuts its executors down (a plain atexit handler runs
+# after, when MediaPipe's dispatch can no longer complete). close() is
+# idempotent, so the __del__ that follows finds nothing left to do.
+import threading as _threading
+
+_LIVE_MP_DETECTORS: List[Any] = []
+_LIVE_MP_LOCK = _threading.Lock()
+
+
+def _track_mediapipe(detector: Any) -> Any:
+    with _LIVE_MP_LOCK:
+        _LIVE_MP_DETECTORS.append(detector)
+    return detector
+
+
+def close_all_mediapipe_detectors() -> None:
+    with _LIVE_MP_LOCK:
+        detectors = list(_LIVE_MP_DETECTORS)
+        _LIVE_MP_DETECTORS.clear()
+    for detector in detectors:
+        try:
+            detector.close()
+        except Exception:
+            pass
+
+
+try:
+    _threading._register_atexit(close_all_mediapipe_detectors)
+except Exception:  # private API; fall back to the ordinary hook
+    import atexit as _atexit
+
+    _atexit.register(close_all_mediapipe_detectors)
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +197,7 @@ class FaceDetector:
         self._mp_tasks_detector = None
         self._mp_legacy_detector = None
         self._yunet_path = None
+        self._yunet = None          # created once, resized per image (see _yunet_for)
         self._haar_cascade = None
 
         self._init_backends()
@@ -167,7 +214,7 @@ class FaceDetector:
                     base_options=mp.tasks.BaseOptions(model_asset_path=model_paths["tflite"]),
                     min_detection_confidence=self.min_confidence
                 )
-                self._mp_tasks_detector = vision.FaceDetector.create_from_options(options)
+                self._mp_tasks_detector = _track_mediapipe(vision.FaceDetector.create_from_options(options))
             except Exception:
                 self._mp_tasks_detector = None
 
@@ -250,8 +297,15 @@ class FaceDetector:
             if raw_faces:
                 backend_used = "mediapipe_legacy"
 
-        # 4. Fallback: OpenCV Haar Cascade
-        if not raw_faces and self._haar_cascade is not None:
+        # 4. Last resort only: OpenCV Haar Cascade, and only when no ML backend
+        #    loaded at all. As a routine third pass it made every photo without
+        #    faces (landscapes, animals) pay 20-380 ms on top of the ML
+        #    backends, and on real uploads it found nothing they had missed.
+        ml_available = (
+            self._mp_tasks_detector is not None or self._yunet_path is not None
+            or self._mp_legacy_detector is not None
+        )
+        if not raw_faces and not ml_available and self._haar_cascade is not None:
             raw_faces = self._detect_opencv_haar(image_bgr)
             if raw_faces:
                 backend_used = "opencv_haar"
@@ -361,6 +415,20 @@ class FaceDetector:
 
         return all_detections
 
+    def _yunet_for(self, width: int, height: int):
+        """
+        The YuNet detector, created on first use and resized per image.
+        Creating it loads and parses the ONNX model -- previously done for
+        every tile of every photo. A FaceDetector belongs to one thread
+        (filter_engine keeps one engine per pool thread), so reuse is safe.
+        """
+        if self._yunet is None:
+            self._yunet = cv2.FaceDetectorYN_create(
+                self._yunet_path, "", (width, height), self.min_confidence, 0.3, 5000
+            )
+        self._yunet.setInputSize((width, height))
+        return self._yunet
+
     def _detect_yunet_tiled(self, image_bgr: np.ndarray) -> List[Dict[str, Any]]:
         """Detect faces using OpenCV SOTA YuNet deep learning detector across multi-scale tile grid."""
         img_h, img_w = image_bgr.shape[:2]
@@ -374,8 +442,7 @@ class FaceDetector:
                 continue
 
             try:
-                yunet = cv2.FaceDetectorYN_create(self._yunet_path, "", (tw, th), self.min_confidence, 0.3, 5000)
-                yunet.setInputSize((tw, th))
+                yunet = self._yunet_for(tw, th)
                 _, faces = yunet.detect(crop_bgr)
                 if faces is not None:
                     for f in faces:
@@ -388,11 +455,18 @@ class FaceDetector:
                         g_w = bw / img_w
                         g_h = bh / img_h
 
+                        # float(): YuNet returns numpy.float32, which the API's
+                        # JSON encoder cannot serialise -- face keypoints travel
+                        # in the ingest response, so every photo with a face
+                        # detected by YuNet made the request fail with a 500.
                         kps = {
-                            "right_eye": {"x": (tx + f[4]) / img_w, "y": (ty + f[5]) / img_h},
-                            "left_eye": {"x": (tx + f[6]) / img_w, "y": (ty + f[7]) / img_h},
-                            "nose_tip": {"x": (tx + f[8]) / img_w, "y": (ty + f[9]) / img_h},
-                            "mouth_center": {"x": (tx + (f[10] + f[12]) / 2.0) / img_w, "y": (ty + (f[11] + f[13]) / 2.0) / img_h}
+                            "right_eye": {"x": float((tx + f[4]) / img_w), "y": float((ty + f[5]) / img_h)},
+                            "left_eye": {"x": float((tx + f[6]) / img_w), "y": float((ty + f[7]) / img_h)},
+                            "nose_tip": {"x": float((tx + f[8]) / img_w), "y": float((ty + f[9]) / img_h)},
+                            "mouth_center": {
+                                "x": float((tx + (f[10] + f[12]) / 2.0) / img_w),
+                                "y": float((ty + (f[11] + f[13]) / 2.0) / img_h),
+                            },
                         }
 
                         all_detections.append({

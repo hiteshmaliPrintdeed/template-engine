@@ -148,6 +148,9 @@ class GenerateVariationsRequest(BaseModel):
     custom_title: Optional[str] = None
     include_text: bool = True
     subtitle: Optional[str] = None
+    # Opt-in: let Gemini see ~3 representative thumbnails per story segment to
+    # write captions. False (and absent, for older clients) sends no photos.
+    use_photo_vision: bool = False
 
 
 class SuggestTitlesRequest(BaseModel):
