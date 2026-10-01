@@ -512,65 +512,35 @@ export default function AIChatbotWidget({
       )}
 
       {/* =================================================================
-          SCREEN 2: UNIFIED COSMIC CHAT & PHOTO INGESTION INTERFACE
+          SCREEN 2: CLEAN, WARM STORY CONVERSATION & PHOTO CURATION
           ================================================================= */}
       {hasStartedStory && (
-        <div className="mx-cosmic-story-shell">
-          {/* Uiverse Cosmic Starfield Background */}
-          <div className="cosmic-container">
-            <div id="stars" />
-            <div id="stars2" />
-            <div id="stars3" />
-          </div>
-
+        <div className="pixovo-chat-shell">
           {/* Top Stage Bar with Back navigation */}
-          <div
-            className="mx-chat-top-bar"
-            style={{
-              position: 'relative',
-              zIndex: 10,
-              maxWidth: '1200px',
-              margin: '0 auto',
-              width: '100%',
-              padding: '1rem clamp(1rem, 3.5vw, 2.5rem) 0.5rem',
-              borderBottom: '1px solid rgba(255, 255, 255, 0.1)'
-            }}
-          >
+          <div className="pixovo-chat-top-bar">
             <button
               type="button"
-              className="mx-chat-back-btn"
+              className="pixovo-chat-back-btn"
               onClick={() => {
                 setMessages([]);
                 setHeroStoryInput('');
               }}
-              title="Return to Story Mode Welcome Hero"
-              style={{
-                color: 'rgba(255, 255, 255, 0.85)',
-                background: 'rgba(255, 255, 255, 0.08)',
-                borderColor: 'rgba(255, 255, 255, 0.16)'
-              }}
+              title="Return to Story Selector"
             >
               <ArrowLeft size={14} strokeWidth={2.4} />
               <span>Back to Story Selector</span>
             </button>
-            <span
-              className="mx-chat-stage-pill"
-              style={{
-                color: '#4BB8C4',
-                background: 'rgba(75, 184, 196, 0.15)',
-                borderColor: 'rgba(75, 184, 196, 0.35)'
-              }}
-            >
-              <Sparkles size={11} strokeWidth={2.2} style={{ marginRight: '4px', verticalAlign: '-1px' }} />
-              Story Mode · AI Cosmic Studio
+            <span className="pixovo-chat-stage-pill">
+              <Heart size={13} strokeWidth={2.2} color="#0BA28D" />
+              <span>pixovo · Story Mode</span>
             </span>
           </div>
 
-          {/* Two-Column Cosmic Content Layout */}
-          <div className="mx-cosmic-content-layout">
+          {/* Two-Column Clean Content Layout */}
+          <div className="pixovo-chat-layout">
             {/* LEFT PANEL: AI Talking Indicator & Live Upload Radar */}
-            <aside className="mx-cosmic-left-panel">
-              {/* Uiverse-powered Pulsing AI Talking Loader with 4-Color Smooth Rainbow Transition */}
+            <aside className="pixovo-chat-left-panel">
+              {/* Pulsing AI Talking Loader with 4-Color Smooth Rainbow Transition */}
               <div
                 className="pixovo-cosmic-loader-wrap"
                 title="Pixovo AI Companion talking & analyzing"
@@ -579,12 +549,12 @@ export default function AIChatbotWidget({
                 <span className="loader" />
               </div>
 
-              <div className="mx-cosmic-ai-badge">
+              <div className="pixovo-chat-ai-badge">
                 <Sparkles size={11} strokeWidth={2.2} />
                 <span>AI Talking Companion</span>
               </div>
 
-              <h3 className="mx-cosmic-ai-status-title">
+              <h3 className="pixovo-chat-ai-status-title">
                 {isDownsampling
                   ? 'Curating Photos...'
                   : !isPhotoUploadComplete && totalCount > 0
@@ -596,7 +566,7 @@ export default function AIChatbotWidget({
                   : 'AI Story Guide'}
               </h3>
 
-              <p className="mx-cosmic-ai-status-sub">
+              <p className="pixovo-chat-ai-status-sub">
                 {isDownsampling
                   ? `Scanning & filtering duplicates (${downsampleStats.completed}/${downsampleStats.total})`
                   : !isPhotoUploadComplete && totalCount > 0
@@ -605,10 +575,10 @@ export default function AIChatbotWidget({
               </p>
 
               {/* Photo Ingestion & Curation Mini Tracker */}
-              <div className="mx-cosmic-upload-tracker">
-                <div className="mx-cosmic-upload-header">
+              <div className="pixovo-chat-upload-tracker">
+                <div className="pixovo-chat-upload-header">
                   <span>Photo Status</span>
-                  <span style={{ color: '#4BB8C4' }}>
+                  <span style={{ color: '#0BA28D', fontWeight: 700 }}>
                     {isPhotoUploadComplete && !isDownsampling && totalCount > 0
                       ? `${survivedCount} Ready`
                       : totalCount > 0
@@ -617,9 +587,9 @@ export default function AIChatbotWidget({
                   </span>
                 </div>
 
-                <div className="mx-cosmic-progress-track">
+                <div className="pixovo-chat-progress-track">
                   <div
-                    className="mx-cosmic-progress-fill"
+                    className="pixovo-chat-progress-fill"
                     style={{ width: `${Math.max(totalCount > 0 ? 8 : 0, uploadPct)}%` }}
                   />
                 </div>
@@ -632,7 +602,7 @@ export default function AIChatbotWidget({
                     marginTop: '0.2rem'
                   }}
                 >
-                  <span style={{ fontSize: '0.74rem', color: 'rgba(255, 255, 255, 0.6)' }}>
+                  <span style={{ fontSize: '0.74rem', color: '#7E8D9E' }}>
                     {totalCount > 0
                       ? `${completedCount}/${totalCount} scanned • ${survivedCount} curated`
                       : 'No photos selected yet'}
@@ -643,7 +613,7 @@ export default function AIChatbotWidget({
                     style={{
                       background: 'transparent',
                       border: 'none',
-                      color: '#4BB8C4',
+                      color: '#0BA28D',
                       fontSize: '0.74rem',
                       fontWeight: 700,
                       cursor: 'pointer',
@@ -656,11 +626,11 @@ export default function AIChatbotWidget({
 
                 {/* Mini Live Photo Strip in Left Panel */}
                 {inlineStripThumbs.length > 0 && (
-                  <div className="mx-cosmic-thumbs-strip">
+                  <div className="pixovo-chat-thumbs-strip">
                     {inlineStripThumbs.slice(0, 6).map((item) => (
                       <div
                         key={item.photo_id}
-                        className="mx-cosmic-thumb-item"
+                        className="pixovo-chat-thumb-item"
                         onClick={() => setIsPhotoModalOpen(true)}
                         title={item.filename}
                         style={{ cursor: 'pointer' }}
@@ -676,14 +646,14 @@ export default function AIChatbotWidget({
                     ))}
                     {reconciledPhotos.length > 6 && (
                       <div
-                        className="mx-cosmic-thumb-item"
+                        className="pixovo-chat-thumb-item"
                         onClick={() => setIsPhotoModalOpen(true)}
                         style={{
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          background: 'rgba(255, 255, 255, 0.1)',
-                          color: '#ffffff',
+                          background: '#E8F6F4',
+                          color: '#0BA28D',
                           fontSize: '0.74rem',
                           fontWeight: 700,
                           cursor: 'pointer'
@@ -698,35 +668,35 @@ export default function AIChatbotWidget({
             </aside>
 
             {/* MAIN PANEL: Conversational Turns & Inner Customization */}
-            <main className="mx-cosmic-main-panel">
-              <div className="mx-cosmic-turns-box">
+            <main className="pixovo-chat-main-panel">
+              <div className="pixovo-chat-turns-box">
                 {/* User & AI Conversation Turns */}
                 {messages.map((msg, idx) => {
                   if (msg.role === 'user') {
                     return (
-                      <div key={msg.id || idx} className="mx-cosmic-user-row">
-                        <div className="mx-cosmic-user-bubble">{msg.text}</div>
+                      <div key={msg.id || idx} className="pixovo-chat-user-row">
+                        <div className="pixovo-chat-user-bubble">{msg.text}</div>
                       </div>
                     );
                   }
                   return (
-                    <div key={msg.id || idx} className="mx-cosmic-ai-row">
-                      <div className="mx-cosmic-ai-head">
+                    <div key={msg.id || idx} className="pixovo-chat-ai-row">
+                      <div className="pixovo-chat-ai-head">
                         <Sparkles size={13} strokeWidth={2.4} />
                         <span>Story Companion</span>
                       </div>
-                      <p className="mx-cosmic-ai-text">{msg.text}</p>
+                      <p className="pixovo-chat-ai-text">{msg.text}</p>
                     </div>
                   );
                 })}
 
                 {/* Inline Photo Ingestion Status in Main Flow */}
-                <div className="mx-cosmic-ai-row">
-                  <div className="mx-cosmic-ai-head">
+                <div className="pixovo-chat-ai-row">
+                  <div className="pixovo-chat-ai-head">
                     <ImageIcon size={13} strokeWidth={2.4} />
                     <span>Photo Ingestion &amp; Curation</span>
                   </div>
-                  <p className="mx-cosmic-ai-text">
+                  <p className="pixovo-chat-ai-text">
                     {totalCount === 0
                       ? "Select up to 1,000 photos — our engine automatically removes blurs and duplicates while you describe your story."
                       : isPhotoUploadComplete && !isDownsampling
@@ -741,25 +711,25 @@ export default function AIChatbotWidget({
                       onClick={triggerFilePicker}
                       style={{
                         cursor: 'pointer',
-                        border: '1.5px dashed rgba(255, 255, 255, 0.25)',
-                        background: 'rgba(255, 255, 255, 0.04)',
+                        border: '1.5px dashed rgba(11, 162, 141, 0.35)',
+                        background: '#E8F6F4',
                         textAlign: 'center',
                         padding: '1.5rem',
                         borderRadius: '16px'
                       }}
                     >
-                      <UploadCloud size={32} color="#4BB8C4" style={{ margin: '0 auto 0.4rem' }} />
+                      <UploadCloud size={32} color="#0BA28D" style={{ margin: '0 auto 0.4rem' }} />
                       <div
                         style={{
                           fontWeight: 700,
                           fontSize: '0.96rem',
-                          color: '#ffffff',
+                          color: '#1F2937',
                           marginBottom: '0.2rem'
                         }}
                       >
                         Tap to add photos, or drop them anywhere
                       </div>
-                      <div style={{ fontSize: '0.8rem', color: 'rgba(255, 255, 255, 0.6)' }}>
+                      <div style={{ fontSize: '0.8rem', color: '#7E8D9E' }}>
                         Fast 512px local worker curation • Supports JPEG, PNG, WebP
                       </div>
                     </div>
@@ -769,8 +739,8 @@ export default function AIChatbotWidget({
                   {(totalCount > 0 || isDownsampling) && (
                     <div
                       style={{
-                        background: 'rgba(255, 255, 255, 0.04)',
-                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        background: '#F7F4F0',
+                        border: '1px solid rgba(0, 0, 0, 0.06)',
                         borderRadius: '16px',
                         padding: '1rem'
                       }}
@@ -783,38 +753,38 @@ export default function AIChatbotWidget({
                           marginBottom: '0.75rem'
                         }}
                       >
-                        <span style={{ fontSize: '0.84rem', fontWeight: 600, color: '#ffffff' }}>
+                        <span style={{ fontSize: '0.84rem', fontWeight: 600, color: '#1F2937' }}>
                           {isDownsampling ? (
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}>
-                              <RefreshCw size={14} className="animate-spin" color="#4BB8C4" />
+                              <RefreshCw size={14} className="animate-spin" color="#0BA28D" />
                               Preparing ({downsampleStats.completed}/{downsampleStats.total})...
                             </span>
                           ) : !isPhotoUploadComplete ? (
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}>
-                              <RefreshCw size={14} className="animate-spin" color="#4BB8C4" />
+                              <RefreshCw size={14} className="animate-spin" color="#0BA28D" />
                               Uploading ({completedCount}/{totalCount})...
                             </span>
                           ) : (
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}>
-                              <Check size={15} color="#0BA28D" />
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', color: '#2D6A35' }}>
+                              <Check size={15} color="#2D6A35" />
                               {survivedCount} photos curated &amp; ready ({totalCount} scanned)
                             </span>
                           )}
                         </span>
                         <button
                           type="button"
-                          className="mx-cosmic-chip"
+                          className="pixovo-chat-chip"
                           onClick={() => setIsPhotoModalOpen(true)}
                         >
                           Manage Photos
                         </button>
                       </div>
 
-                      <div className="mx-cosmic-thumbs-strip">
+                      <div className="pixovo-chat-thumbs-strip">
                         {inlineStripThumbs.map((item) => (
                           <div
                             key={item.photo_id}
-                            className="mx-cosmic-thumb-item"
+                            className="pixovo-chat-thumb-item"
                             onClick={() => setIsPhotoModalOpen(true)}
                             style={{ cursor: 'pointer', width: '56px', height: '56px' }}
                             title={item.filename}
@@ -831,12 +801,12 @@ export default function AIChatbotWidget({
                         {Array.from({ length: shimmerPlaceholderCount }).map((_, sIdx) => (
                           <div
                             key={`shimmer-${sIdx}`}
-                            className="mx-cosmic-thumb-item"
+                            className="pixovo-chat-thumb-item"
                             style={{
                               width: '56px',
                               height: '56px',
                               background:
-                                'linear-gradient(90deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.12) 50%, rgba(255,255,255,0.05) 75%)',
+                                'linear-gradient(90deg, #EFECE6 25%, #E8F6F4 50%, #EFECE6 75%)',
                               backgroundSize: '200% 100%',
                               animation: 'pxShimmer 1.5s infinite linear'
                             }}
@@ -848,8 +818,8 @@ export default function AIChatbotWidget({
                 </div>
 
                 {/* Editorial Styling & Cover Title Card */}
-                <div className="mx-cosmic-card">
-                  <div className="mx-cosmic-ai-head" style={{ marginBottom: '0.75rem' }}>
+                <div className="pixovo-chat-card">
+                  <div className="pixovo-chat-ai-head" style={{ marginBottom: '0.75rem' }}>
                     <BookOpen size={13} strokeWidth={2.4} />
                     <span>Editorial Styling</span>
                   </div>
@@ -863,7 +833,7 @@ export default function AIChatbotWidget({
                   >
                     <button
                       type="button"
-                      className={`mx-cosmic-style-btn ${includeText ? 'selected' : ''}`}
+                      className={`pixovo-chat-style-btn ${includeText ? 'selected' : ''}`}
                       onClick={() => setIncludeText(true)}
                       disabled={isLoading}
                     >
@@ -878,7 +848,7 @@ export default function AIChatbotWidget({
                         }}
                       >
                         <span style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                          <BookOpen size={15} color="#4BB8C4" />
+                          <BookOpen size={15} color="#0BA28D" />
                           Storytelling Captions
                         </span>
                         {includeText && <Check size={15} strokeWidth={2.5} color="#0BA28D" />}
@@ -886,7 +856,7 @@ export default function AIChatbotWidget({
                       <div
                         style={{
                           fontSize: '0.8rem',
-                          color: 'rgba(255, 255, 255, 0.7)',
+                          color: '#5A687D',
                           lineHeight: 1.4
                         }}
                       >
@@ -896,7 +866,7 @@ export default function AIChatbotWidget({
 
                     <button
                       type="button"
-                      className={`mx-cosmic-style-btn ${!includeText ? 'selected' : ''}`}
+                      className={`pixovo-chat-style-btn ${!includeText ? 'selected' : ''}`}
                       onClick={() => setIncludeText(false)}
                       disabled={isLoading}
                     >
@@ -911,7 +881,7 @@ export default function AIChatbotWidget({
                         }}
                       >
                         <span style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                          <ImageIcon size={15} color="#4BB8C4" />
+                          <ImageIcon size={15} color="#0BA28D" />
                           Clean Photo-Forward
                         </span>
                         {!includeText && <Check size={15} strokeWidth={2.5} color="#0BA28D" />}
@@ -919,7 +889,7 @@ export default function AIChatbotWidget({
                       <div
                         style={{
                           fontSize: '0.8rem',
-                          color: 'rgba(255, 255, 255, 0.7)',
+                          color: '#5A687D',
                           lineHeight: 1.4
                         }}
                       >
@@ -936,8 +906,8 @@ export default function AIChatbotWidget({
                         alignItems: 'flex-start',
                         marginTop: '0.85rem',
                         padding: '0.75rem 1rem',
-                        background: 'rgba(255, 255, 255, 0.04)',
-                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        background: '#F7F4F0',
+                        border: '1px solid rgba(0, 0, 0, 0.06)',
                         borderRadius: '12px',
                         cursor: isLoading ? 'default' : 'pointer'
                       }}
@@ -949,10 +919,10 @@ export default function AIChatbotWidget({
                         disabled={isLoading}
                         style={{ marginTop: '3px', accentColor: '#0BA28D' }}
                       />
-                      <span style={{ fontSize: '0.82rem', color: 'rgba(255, 255, 255, 0.9)' }}>
+                      <span style={{ fontSize: '0.82rem', color: '#1F2937' }}>
                         <strong>Let AI inspect a few photos to write captions</strong>
                         <br />
-                        <small style={{ color: 'rgba(255, 255, 255, 0.55)', fontSize: '0.76rem' }}>
+                        <small style={{ color: '#7E8D9E', fontSize: '0.76rem' }}>
                           About 3 photos per chapter are sent to Google Gemini. Off by default.
                         </small>
                       </span>
@@ -964,7 +934,7 @@ export default function AIChatbotWidget({
                     style={{
                       marginTop: '1rem',
                       paddingTop: '1rem',
-                      borderTop: '1px solid rgba(255, 255, 255, 0.1)'
+                      borderTop: '1px solid rgba(0, 0, 0, 0.06)'
                     }}
                   >
                     <div
@@ -982,34 +952,34 @@ export default function AIChatbotWidget({
                           gap: '0.45rem',
                           fontWeight: 700,
                           fontSize: '0.88rem',
-                          color: '#ffffff'
+                          color: '#1F2937'
                         }}
                       >
-                        <Type size={14} color="#4BB8C4" />
+                        <Type size={14} color="#0BA28D" />
                         <span>Book Cover Title</span>
                       </div>
                       <button
                         type="button"
-                        className="mx-cosmic-chip"
+                        className="pixovo-chat-chip"
                         onClick={handleSuggestTitles}
                         disabled={isLoading || isSuggestingTitles}
                       >
                         {isSuggestingTitles ? (
                           <RefreshCw size={12} className="animate-spin" />
                         ) : (
-                          <Sparkles size={12} color="#F2C94C" />
+                          <Sparkles size={12} color="#0BA28D" />
                         )}
                         <span>Suggest AI Titles</span>
                       </button>
                     </div>
 
                     {!isSuggestingTitles && suggestions && suggestions.titles && (
-                      <div className="mx-cosmic-floating-chips" style={{ marginBottom: '0.65rem' }}>
+                      <div className="pixovo-chat-floating-chips" style={{ marginBottom: '0.65rem' }}>
                         {suggestions.titles.slice(0, 4).map((title, idx) => (
                           <button
                             key={idx}
                             type="button"
-                            className={`mx-cosmic-chip ${selectedTitleIdx === idx ? 'active' : ''}`}
+                            className={`pixovo-chat-chip ${selectedTitleIdx === idx ? 'active' : ''}`}
                             onClick={() => handlePickSuggestedCard(idx)}
                           >
                             {title}
@@ -1035,11 +1005,11 @@ export default function AIChatbotWidget({
                         placeholder="Cover title (or leave blank for AI)..."
                         disabled={isLoading}
                         style={{
-                          background: 'rgba(255, 255, 255, 0.06)',
-                          border: '1px solid rgba(255, 255, 255, 0.15)',
+                          background: '#F7F4F0',
+                          border: '1px solid rgba(0, 0, 0, 0.08)',
                           borderRadius: '10px',
                           padding: '0.55rem 0.85rem',
-                          color: '#ffffff',
+                          color: '#1F2937',
                           fontSize: '0.86rem',
                           outline: 'none'
                         }}
@@ -1051,11 +1021,11 @@ export default function AIChatbotWidget({
                         placeholder="Optional subtitle (e.g. SUMMER 2026)..."
                         disabled={isLoading}
                         style={{
-                          background: 'rgba(255, 255, 255, 0.06)',
-                          border: '1px solid rgba(255, 255, 255, 0.15)',
+                          background: '#F7F4F0',
+                          border: '1px solid rgba(0, 0, 0, 0.08)',
                           borderRadius: '10px',
                           padding: '0.55rem 0.85rem',
-                          color: '#ffffff',
+                          color: '#1F2937',
                           fontSize: '0.86rem',
                           outline: 'none'
                         }}
@@ -1070,17 +1040,17 @@ export default function AIChatbotWidget({
           </div>
 
           {/* FLOATING NO-BOUNDARY BOTTOM TYPING SECTION & QUICK OPTIONS */}
-          <div className="mx-cosmic-bottom-bar">
-            <div className="mx-cosmic-bottom-inner">
+          <div className="pixovo-chat-bottom-bar">
+            <div className="pixovo-chat-bottom-inner">
               {/* Floating Quick Ideas / Followup Chips */}
-              <div className="mx-cosmic-floating-chips">
+              <div className="pixovo-chat-floating-chips">
                 {FOLLOWUP_CHIPS.map((chip) => {
                   const active = selectedChips.includes(chip);
                   return (
                     <button
                       key={chip}
                       type="button"
-                      className={`mx-cosmic-chip ${active ? 'active' : ''}`}
+                      className={`pixovo-chat-chip ${active ? 'active' : ''}`}
                       onClick={() => handleToggleFollowupChip(chip)}
                     >
                       {active && (
@@ -1096,67 +1066,71 @@ export default function AIChatbotWidget({
                 })}
               </div>
 
-              {/* Visually Borderless / No Boundary Floating Typing Slot */}
-              <form
-                className="mx-cosmic-noboundary-input-wrap"
-                onSubmit={handleSendMessage}
-              >
-                <button
-                  type="button"
-                  className="mx-cosmic-chip"
-                  onClick={() => {
-                    if (totalCount > 0) setIsPhotoModalOpen(true);
-                    else triggerFilePicker();
-                  }}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.45rem',
-                    padding: '0.42rem 0.85rem'
-                  }}
-                  title="Upload or manage photos"
-                >
-                  <ImageIcon size={15} color="#4BB8C4" />
-                  <span>Photos {totalCount > 0 ? `(${survivedCount})` : ''}</span>
-                </button>
+              {/* Floating Typing Slot with Ambient Glow */}
+              <div style={{ position: 'relative', width: '100%' }}>
+                <div className="pixovo-clean-dock-glow" />
 
-                <input
-                  type="text"
-                  className="mx-cosmic-noboundary-input"
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Type your story, trip details, or wishes here... (No boundaries)"
-                  disabled={isLoading}
-                />
-
-                <button
-                  type="submit"
-                  className="mx-cosmic-send-btn"
-                  disabled={!chatInput.trim() || isLoading}
-                  aria-label="Send message"
+                <form
+                  className="pixovo-chat-input-wrap"
+                  onSubmit={handleSendMessage}
                 >
-                  <ArrowUp size={18} strokeWidth={2.5} />
-                </button>
+                  <button
+                    type="button"
+                    className="pixovo-chat-chip"
+                    onClick={() => {
+                      if (totalCount > 0) setIsPhotoModalOpen(true);
+                      else triggerFilePicker();
+                    }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.45rem',
+                      padding: '0.42rem 0.85rem'
+                    }}
+                    title="Upload or manage photos"
+                  >
+                    <ImageIcon size={15} color="#0BA28D" />
+                    <span>Photos {totalCount > 0 ? `(${survivedCount})` : ''}</span>
+                  </button>
 
-                <button
-                  type="button"
-                  className="mx-cosmic-launch-btn"
-                  onClick={handleLaunchBookCreation}
-                  disabled={isLoading || isWaitingForIngest || isDownsampling}
-                >
-                  {isWaitingForIngest ? (
-                    <>
-                      <RefreshCw size={16} strokeWidth={2} className="animate-spin" />
-                      <span>Finishing upload...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles size={16} strokeWidth={2.2} />
-                      <span>Start creating my book</span>
-                    </>
-                  )}
-                </button>
-              </form>
+                  <input
+                    type="text"
+                    className="pixovo-chat-input"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    placeholder="Add more story details, trip memories, or notes..."
+                    disabled={isLoading}
+                  />
+
+                  <button
+                    type="submit"
+                    className="pixovo-chat-send-btn"
+                    disabled={!chatInput.trim() || isLoading}
+                    aria-label="Send message"
+                  >
+                    <ArrowUp size={18} strokeWidth={2.5} />
+                  </button>
+
+                  <button
+                    type="button"
+                    className="pixovo-chat-launch-btn"
+                    onClick={handleLaunchBookCreation}
+                    disabled={isLoading || isWaitingForIngest || isDownsampling}
+                  >
+                    {isWaitingForIngest ? (
+                      <>
+                        <RefreshCw size={16} strokeWidth={2} className="animate-spin" />
+                        <span>Finishing upload...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={16} strokeWidth={2.2} />
+                        <span>Start creating my book</span>
+                      </>
+                    )}
+                  </button>
+                </form>
+              </div>
             </div>
           </div>
         </div>

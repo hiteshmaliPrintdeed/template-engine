@@ -969,13 +969,15 @@ function AppContent() {
 
   return (
     <div className="app-container">
-      <ToolbarHeader
-        onExportPDF={step === 'preview' ? () => handleExportPDF(false) : null}
-        isExporting={isExportingPDF}
-        syncStatus={syncStatus}
-        onClearSession={handleClearSession}
-        canClearSession={step !== 'upload' || uploadedCount > 0 || Boolean(userPrompt.trim())}
-      />
+      {step === 'preview' && (
+        <ToolbarHeader
+          onExportPDF={() => handleExportPDF(false)}
+          isExporting={isExportingPDF}
+          syncStatus={syncStatus}
+          onClearSession={handleClearSession}
+          canClearSession={true}
+        />
+      )}
 
       <main className={`main-wrapper ${isStoryConversationalStep ? 'main-wrapper--story' : ''}`.trim()}>
         {capacityState && (
