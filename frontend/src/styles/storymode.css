@@ -1,68 +1,77 @@
 /* Pixovo Story Mode — Warm & Pleasant Editorial Design System */
 :root {
-  /* Warm & Pleasant Editorial Palette */
-  --mx-brand-purple: #c86d51;
-  --mx-brand-purple-hover: #b55b3f;
-  --mx-brand-purple-pressed: #9e4b31;
-  --mx-deep-purple: #2a211b;
-  --mx-periwinkle: #d9825b;
-  --mx-periwinkle-mid: #cc744e;
-  --mx-periwinkle-dark: #b8623d;
-  --mx-periwinkle-soft: #f2dfd3;
-  --mx-periwinkle-subtle: #fbf3ed;
-  --mx-periwinkle-faint: #fdfaf6;
-  --mx-story-mid: #faf6f0;
-  --mx-story-bottom: #f3e8dc;
-  --mx-cream-white: #fffdf9;
-  --mx-cream-hover: #f6efe6;
-  --mx-cream-pressed: #ebe1d3;
-  --mx-story-pink: #d97f6c;
-  --mx-story-magenta: #c86d51;
-  --mx-story-peach: #f5d0a9;
-  --mx-story-coral: #e2956b;
+  /* Pixovo Official Brand Palette (Sampled from Official UI) */
+  --mx-brand-purple: #0BA28D;
+  --mx-brand-purple-hover: #088574;
+  --mx-brand-purple-pressed: #056B5D;
+  --mx-deep-purple: #032A2A;
 
-  /* Canvas & Backgrounds (Warm Alabaster, Sunlit Linen & Parchment) */
-  --px-canvas-bg: #faf6f0;
-  --px-canvas-warm: #f4ede2;
-  --px-surface-card: #fffdf9;
-  --px-surface-card-subtle: rgba(255, 253, 249, 0.92);
-  --px-surface-overlay: rgba(42, 33, 27, 0.48);
+  /* Teals & Brand Signature */
+  --mx-periwinkle: #0BA28D;
+  --mx-periwinkle-mid: #088574;
+  --mx-periwinkle-dark: #056B5D;
+  --mx-periwinkle-soft: #E8F6F4;
+  --mx-periwinkle-subtle: #F0FAF8;
+  --mx-periwinkle-faint: #F7FCFB;
+
+  /* Canvas & Background Surfaces */
+  --mx-story-mid: #F7F4F0;
+  --mx-story-bottom: #EFECE6;
+  --mx-cream-white: #FFFFFF;
+  --mx-cream-hover: #F2EFEA;
+  --mx-cream-pressed: #E8E2D8;
+
+  /* Stepper Accents (Exact from Step 1-4 icons & Organic Hero Shapes) */
+  --mx-story-coral: #D98A86;
+  --mx-story-sky: #4BB8C4;
+  --mx-story-amber: #F2C94C;
+  --mx-story-sage: #94AC93;
+  --mx-story-pink: #D98A86;
+  --mx-story-magenta: #0BA28D;
+  --mx-story-peach: #F2C94C;
+
+  /* Canvas & Backgrounds (Pixovo Warm Alabaster, Crisp White Cards) */
+  --px-canvas-bg: #F7F4F0;
+  --px-canvas-warm: #EFECE6;
+  --px-surface-card: #FFFFFF;
+  --px-surface-card-subtle: rgba(255, 255, 255, 0.94);
+  --px-surface-overlay: rgba(3, 42, 42, 0.52);
 
   /* Borders & Dividers */
-  --px-border-light: #e8dfd1;
-  --px-border-subtle: #f2ebe0;
-  --px-border-accent: #e5c5b5;
-  --px-border-active: #c86d51;
+  --px-border-light: #E8E2D8;
+  --px-border-subtle: #EFEAE1;
+  --px-border-accent: #BCE3DC;
+  --px-border-active: #0BA28D;
 
-  /* Typography Colors (Deep Espresso & Warm Walnut) */
-  --px-text-primary: #2a211b;
-  --px-text-secondary: #5c4e43;
-  --px-text-muted: #8a7968;
-  --px-text-subtle: #a89888;
+  /* Typography Colors (Pixovo Deep Marine Slate & Muted Steel) */
+  --px-text-primary: #032A2A;
+  --px-text-secondary: #5A687D;
+  --px-text-muted: #7E8D9E;
+  --px-text-subtle: #A3B0BF;
 
-  /* Primary Brand Accent (Warm Terracotta & Honey Amber) */
-  --px-brand-iris: #c86d51;
-  --px-brand-iris-hover: #b55b3f;
-  --px-brand-iris-active: #9e4b31;
-  --px-brand-iris-subtle: #fdf3ee;
-  --px-brand-iris-border: #ebc3b2;
+  /* Primary Brand Accent (Pixovo Emerald Teal) */
+  --px-brand-iris: #0BA28D;
+  --px-brand-iris-hover: #088574;
+  --px-brand-iris-active: #056B5D;
+  --px-brand-iris-subtle: #E8F6F4;
+  --px-brand-iris-border: #9DDCD2;
 
-  /* Status Colors (Warm Sage & Golden Ochre) */
-  --px-status-success-bg: #f2f7f2;
-  --px-status-success-text: #3b6e4c;
-  --px-status-success-border: #c5decb;
-  --px-status-warning-bg: #fef8ec;
-  --px-status-warning-text: #94621b;
-  --px-status-warning-border: #f3d299;
-  --px-status-warn-text: #c27829;
-  --px-status-danger-text: #c94a38;
+  /* Status Colors */
+  --px-status-success-bg: #EDF7EE;
+  --px-status-success-text: #2D6A35;
+  --px-status-success-border: #BCE0BF;
+  --px-status-warning-bg: #FDF8EB;
+  --px-status-warning-text: #946A1B;
+  --px-status-warning-border: #F3DC99;
+  --px-status-warn-text: #B87B1E;
+  --px-status-danger-text: #C84B38;
 
-  /* Layered Warm Shadows */
-  --px-shadow-sm: 0 2px 10px rgba(42, 33, 27, 0.05);
-  --px-shadow-subtle: 0 4px 14px rgba(42, 33, 27, 0.06);
-  --px-shadow-card: 0 16px 40px -8px rgba(42, 33, 27, 0.08), 0 2px 10px rgba(42, 33, 27, 0.04);
-  --px-shadow-hover: 0 18px 38px -6px rgba(200, 109, 81, 0.18);
-  --px-shadow-book: 0 24px 52px -12px rgba(42, 33, 27, 0.24), 0 6px 16px rgba(42, 33, 27, 0.08);
+  /* Layered Shadows Tinted with Deep Marine */
+  --px-shadow-sm: 0 2px 10px rgba(3, 42, 42, 0.05);
+  --px-shadow-subtle: 0 4px 14px rgba(3, 42, 42, 0.06);
+  --px-shadow-card: 0 16px 40px -8px rgba(3, 42, 42, 0.07), 0 2px 10px rgba(3, 42, 42, 0.04);
+  --px-shadow-hover: 0 18px 38px -6px rgba(11, 162, 141, 0.22);
+  --px-shadow-book: 0 24px 52px -12px rgba(3, 42, 42, 0.22), 0 6px 16px rgba(3, 42, 42, 0.08);
 
   /* Motion & Easing */
   --px-ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
@@ -83,7 +92,7 @@ html {
 
 body {
   font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  background: radial-gradient(circle at 50% 0%, #fffdf9 0%, #faf6f0 52%, #f3eae0 100%);
+  background: radial-gradient(circle at 50% 0%, #FFFFFF 0%, #F7F4F0 60%, #EFECE6 100%);
   color: var(--px-text-primary);
   min-height: 100vh;
   min-height: 100dvh;
@@ -1714,7 +1723,7 @@ input:focus-visible,
 
 /* Warm Sunlit Signature CTA Button */
 .mx-btn-story-mode {
-  background: linear-gradient(135deg, #c86d51 0%, #d9825b 52%, #e59f71 100%);
+  background: linear-gradient(135deg, #0BA28D 0%, #0DAA94 52%, #4BB8C4 100%);
   border-radius: 999px;
   color: #ffffff;
   font-weight: 700;
@@ -1726,14 +1735,14 @@ input:focus-visible,
   align-items: center;
   justify-content: center;
   gap: 0.55rem;
-  box-shadow: 0 12px 28px -6px rgba(200, 109, 81, 0.42), 0 2px 6px rgba(42, 33, 27, 0.08);
+  box-shadow: 0 12px 28px -6px rgba(11, 162, 141, 0.42), 0 2px 6px rgba(3, 42, 42, 0.08);
   transition: transform 0.28s var(--px-ease-out-expo), box-shadow 0.28s var(--px-ease-out-expo), filter 0.2s ease;
   white-space: nowrap;
 }
 
 .mx-btn-story-mode:hover:not(:disabled) {
   transform: translateY(-2px) scale(1.015);
-  box-shadow: 0 16px 34px -6px rgba(200, 109, 81, 0.52), 0 4px 10px rgba(42, 33, 27, 0.1);
+  box-shadow: 0 16px 34px -6px rgba(11, 162, 141, 0.52), 0 4px 10px rgba(3, 42, 42, 0.1);
   filter: brightness(1.03);
 }
 
@@ -1760,7 +1769,7 @@ input:focus-visible,
   );
   border-radius: 28px;
   border: 1px solid var(--px-border-light);
-  box-shadow: 0 24px 60px -16px rgba(42, 33, 27, 0.10), 0 4px 14px rgba(42, 33, 27, 0.04);
+  box-shadow: 0 24px 60px -16px rgba(3, 42, 42, 0.10), 0 4px 14px rgba(3, 42, 42, 0.04);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1837,7 +1846,7 @@ input:focus-visible,
   background: rgba(255, 253, 249, 0.92);
   backdrop-filter: blur(10px);
   border: 1px solid var(--px-border-light);
-  box-shadow: 0 4px 14px rgba(42, 33, 27, 0.05);
+  box-shadow: 0 4px 14px rgba(3, 42, 42, 0.05);
   cursor: pointer;
   text-align: left;
   transition: transform 0.26s var(--px-ease-out-expo), background 0.26s ease, border-color 0.26s ease, box-shadow 0.26s var(--px-ease-out-expo);
@@ -1849,7 +1858,7 @@ input:focus-visible,
   background: #ffffff;
   border-color: var(--px-brand-iris-border);
   transform: translateY(-3px) scale(1.01);
-  box-shadow: 0 12px 24px -6px rgba(200, 109, 81, 0.16);
+  box-shadow: 0 12px 24px -6px rgba(11, 162, 141, 0.16);
 }
 
 .mx-occasion-card:active {
@@ -1865,7 +1874,7 @@ input:focus-visible,
   align-items: center;
   justify-content: center;
   color: #ffffff;
-  box-shadow: 0 4px 10px rgba(200, 109, 81, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+  box-shadow: 0 4px 10px rgba(11, 162, 141, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.28);
 }
 
 .mx-occasion-card-body {
@@ -1912,12 +1921,12 @@ input:focus-visible,
   max-width: 84%;
   padding: 0.78rem 1.2rem;
   border-radius: 20px 20px 4px 20px;
-  background: linear-gradient(135deg, #c86d51 0%, #d9825b 100%);
+  background: linear-gradient(135deg, #0BA28D 0%, #088574 100%);
   color: #ffffff;
   font-size: 0.95rem;
   font-weight: 600;
   line-height: 1.45;
-  box-shadow: 0 6px 18px -4px rgba(200, 109, 81, 0.32);
+  box-shadow: 0 6px 18px -4px rgba(11, 162, 141, 0.32);
   display: inline-flex;
   align-items: center;
   gap: 0.55rem;
@@ -1999,7 +2008,7 @@ input:focus-visible,
   background: var(--px-brand-iris);
   border-color: var(--px-brand-iris);
   color: #ffffff;
-  box-shadow: 0 4px 12px rgba(200, 109, 81, 0.28);
+  box-shadow: 0 4px 12px rgba(11, 162, 141, 0.28);
 }
 
 /* Inline Photo Upload Strip & Dropzone inside Chat Stream */
@@ -2053,7 +2062,7 @@ input:focus-visible,
   flex-shrink: 0;
   position: relative;
   cursor: pointer;
-  box-shadow: 0 3px 8px rgba(42, 33, 27, 0.1);
+  box-shadow: 0 3px 8px rgba(3, 42, 42, 0.1);
   border: 1.5px solid #ffffff;
   transition: transform 0.22s var(--px-ease-out-expo);
   animation: warmBubblePop 0.32s var(--px-ease-spring) both;
@@ -2096,7 +2105,7 @@ input:focus-visible,
 .mx-inline-progress-fill {
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, #c86d51 0%, #e59f71 100%);
+  background: linear-gradient(90deg, #0BA28D 0%, #4BB8C4 100%);
   transition: width 0.3s var(--px-ease-out-expo);
 }
 
@@ -2131,7 +2140,7 @@ input:focus-visible,
 .mx-style-option-card.selected {
   background: var(--px-brand-iris-subtle);
   border-color: var(--px-brand-iris);
-  box-shadow: 0 6px 16px -4px rgba(200, 109, 81, 0.18);
+  box-shadow: 0 6px 16px -4px rgba(11, 162, 141, 0.18);
 }
 
 .mx-style-option-title {
@@ -2185,7 +2194,7 @@ input:focus-visible,
   font-family: inherit;
   cursor: pointer;
   flex-shrink: 0;
-  box-shadow: 0 4px 12px rgba(42, 33, 27, 0.06);
+  box-shadow: 0 4px 12px rgba(3, 42, 42, 0.06);
   transition: all 0.22s var(--px-ease-out-expo);
 }
 
@@ -2195,7 +2204,7 @@ input:focus-visible,
   border-color: var(--px-brand-iris-border);
   color: var(--px-brand-iris);
   transform: translateY(-1.5px);
-  box-shadow: 0 6px 16px rgba(200, 109, 81, 0.15);
+  box-shadow: 0 6px 16px rgba(11, 162, 141, 0.15);
 }
 
 .mx-photos-count-badge {
@@ -2217,14 +2226,14 @@ input:focus-visible,
   border-radius: 999px;
   padding: 0.32rem 0.4rem 0.32rem 1.15rem;
   border: 1px solid var(--px-border-light);
-  box-shadow: 0 6px 20px rgba(42, 33, 27, 0.07);
+  box-shadow: 0 6px 20px rgba(3, 42, 42, 0.07);
   min-height: 48px;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .mx-input-pill-bar:focus-within {
   border-color: var(--px-brand-iris);
-  box-shadow: 0 8px 24px rgba(200, 109, 81, 0.16), 0 0 0 3px rgba(200, 109, 81, 0.12);
+  box-shadow: 0 8px 24px rgba(11, 162, 141, 0.16), 0 0 0 3px rgba(11, 162, 141, 0.12);
 }
 
 .mx-input-pill-bar input,
@@ -2249,14 +2258,14 @@ input:focus-visible,
   height: 38px;
   border-radius: 50%;
   border: none;
-  background: linear-gradient(135deg, #c86d51 0%, #d9825b 100%);
+  background: linear-gradient(135deg, #0BA28D 0%, #088574 100%);
   color: #ffffff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
-  box-shadow: 0 3px 10px rgba(200, 109, 81, 0.32);
+  box-shadow: 0 3px 10px rgba(11, 162, 141, 0.32);
   transition: transform 0.2s var(--px-ease-out-expo), opacity 0.2s ease;
 }
 
@@ -2276,7 +2285,7 @@ input:focus-visible,
   position: fixed;
   inset: 0;
   z-index: 950;
-  background: rgba(42, 33, 27, 0.52);
+  background: rgba(3, 42, 42, 0.52);
   backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
@@ -2293,7 +2302,7 @@ input:focus-visible,
   background: var(--px-surface-card);
   border-radius: 24px;
   border: 1px solid var(--px-border-light);
-  box-shadow: 0 28px 64px rgba(42, 33, 27, 0.26);
+  box-shadow: 0 28px 64px rgba(3, 42, 42, 0.26);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -2336,9 +2345,9 @@ input:focus-visible,
   width: 18px;
   background: linear-gradient(
     90deg,
-    rgba(42, 33, 27, 0.18) 0%,
+    rgba(3, 42, 42, 0.18) 0%,
     rgba(255, 255, 255, 0.45) 28%,
-    rgba(42, 33, 27, 0.10) 58%,
+    rgba(3, 42, 42, 0.10) 58%,
     rgba(255, 255, 255, 0.18) 78%,
     rgba(0, 0, 0, 0) 100%
   );
@@ -2415,7 +2424,7 @@ input:focus-visible,
 .mx-view-seg-btn.active {
   background: var(--px-brand-iris);
   color: #ffffff;
-  box-shadow: 0 3px 10px rgba(200, 109, 81, 0.28);
+  box-shadow: 0 3px 10px rgba(11, 162, 141, 0.28);
 }
 
 .mx-layflat-book-frame {
@@ -2429,8 +2438,8 @@ input:focus-visible,
     6px 0 0 -2px #f5efe6,
     -11px 0 0 -4px #e2d8c9,
     11px 0 0 -4px #e2d8c9,
-    0 28px 52px -12px rgba(42, 33, 27, 0.24),
-    0 6px 16px rgba(42, 33, 27, 0.08);
+    0 28px 52px -12px rgba(3, 42, 42, 0.24),
+    0 6px 16px rgba(3, 42, 42, 0.08);
   position: relative;
   animation: warmSpreadReveal 0.42s var(--px-ease-out-expo) both;
 }
@@ -2515,7 +2524,7 @@ input:focus-visible,
   border-color: var(--px-brand-iris);
   color: #ffffff;
   transform: scale(1.06);
-  box-shadow: 0 3px 10px rgba(200, 109, 81, 0.28);
+  box-shadow: 0 3px 10px rgba(11, 162, 141, 0.28);
 }
 
 /* Cross-Device Responsive Breakpoints (Tablet & Mobile) */

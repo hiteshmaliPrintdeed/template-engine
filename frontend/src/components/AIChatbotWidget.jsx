@@ -26,7 +26,7 @@ const OCCASION_CARDS = [
     title: 'My last trip',
     subtitle: 'Road trips, vacations & scenic adventures',
     prompt: 'My last trip',
-    gradient: 'linear-gradient(135deg, #c86d51 0%, #e59f71 100%)',
+    gradient: 'linear-gradient(135deg, #0BA28D 0%, #4BB8C4 100%)',
     Icon: Compass
   },
   {
@@ -34,7 +34,7 @@ const OCCASION_CARDS = [
     title: 'A heartfelt gift',
     subtitle: 'Celebrations, tributes & keepsakes',
     prompt: 'A heartfelt gift for someone special',
-    gradient: 'linear-gradient(135deg, #c46868 0%, #e69d91 100%)',
+    gradient: 'linear-gradient(135deg, #D98A86 0%, #EAA8A4 100%)',
     Icon: Heart
   },
   {
@@ -42,7 +42,7 @@ const OCCASION_CARDS = [
     title: 'Family milestones',
     subtitle: 'Holidays, reunions & everyday joy',
     prompt: 'Family holiday and milestones',
-    gradient: 'linear-gradient(135deg, #b87b46 0%, #e3b271 100%)',
+    gradient: 'linear-gradient(135deg, #E5B438 0%, #F2C94C 100%)',
     Icon: Users
   },
   {
@@ -50,7 +50,7 @@ const OCCASION_CARDS = [
     title: 'Wedding & love',
     subtitle: 'Ceremonies, vows & romantic memories',
     prompt: 'Wedding celebration and love story',
-    gradient: 'linear-gradient(135deg, #9e6752 0%, #d89e86 100%)',
+    gradient: 'linear-gradient(135deg, #032A2A 0%, #0BA28D 100%)',
     Icon: Sparkles
   },
   {
@@ -58,7 +58,7 @@ const OCCASION_CARDS = [
     title: 'Year in review',
     subtitle: 'Highlights from a whole year together',
     prompt: 'Our year in review — favorite memories',
-    gradient: 'linear-gradient(135deg, #627a64 0%, #9ab398 100%)',
+    gradient: 'linear-gradient(135deg, #5C8E64 0%, #94AC93 100%)',
     Icon: Calendar
   },
   {
@@ -66,7 +66,7 @@ const OCCASION_CARDS = [
     title: 'Weekend getaway',
     subtitle: 'Short escapes with friends & family',
     prompt: 'Weekend getaway adventure',
-    gradient: 'linear-gradient(135deg, #cf7e53 0%, #eeb980 100%)',
+    gradient: 'linear-gradient(135deg, #4BB8C4 0%, #94AC93 100%)',
     Icon: Sun
   }
 ];
