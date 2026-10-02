@@ -18,7 +18,9 @@ import {
   UploadCloud,
   Plus,
   Edit3,
-  X
+  ChevronDown,
+  X,
+  SkipForward
 } from 'lucide-react';
 import ParallaxHeroImages from './ui/ParallaxHeroImages';
 import PixovoStoryIntro from './PixovoStoryIntro';
@@ -99,6 +101,71 @@ const FOLLOWUP_CHIPS = [
   'Warm & nostalgic vibe'
 ];
 
+// Custom typewriter effect for AI message text with natural streaming and fading options
+function PixovoTypewriterMessage({
+  text,
+  readyContent = null,
+  speed = 18,
+  isLatest = false,
+  isCompleted = false,
+  onComplete,
+  children
+}) {
+  const [displayedText, setDisplayedText] = useState(isCompleted || !isLatest ? text : '');
+  const [done, setDone] = useState(isCompleted || !isLatest);
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+
+  useEffect(() => {
+    if (isCompleted || !isLatest) {
+      setDisplayedText(text);
+      setDone(true);
+      return;
+    }
+
+    setDisplayedText('');
+    setDone(false);
+    let index = 0;
+    const step = 2; // Stream 2 characters per tick for smooth natural LLM pace
+
+    const timer = setInterval(() => {
+      index += step;
+      if (index >= text.length) {
+        setDisplayedText(text);
+        setDone(true);
+        clearInterval(timer);
+        if (onCompleteRef.current) {
+          onCompleteRef.current();
+        }
+      } else {
+        setDisplayedText(text.slice(0, index));
+      }
+    }, speed);
+
+    return () => clearInterval(timer);
+  }, [text, isLatest, isCompleted, speed]);
+
+  return (
+    <>
+      {done && readyContent ? (
+        readyContent
+      ) : (
+        <p className="pixovo-chat-ai-text">
+          {displayedText}
+          {!done && <span className="pixovo-typing-cursor" aria-hidden="true" />}
+        </p>
+      )}
+
+      {/* Choice Pills & Action Options fade in smoothly once typing finishes */}
+      {done && children && (
+        <div className="pixovo-options-fade-in">
+          {children}
+        </div>
+      )}
+    </>
+  );
+}
+
 export default function AIChatbotWidget({
   userPrompt,
   setUserPrompt,
@@ -115,19 +182,8 @@ export default function AIChatbotWidget({
   const toast = useToast();
 
   // Conversational messages list: [{ id, role: 'user' | 'ai', text }]
-  const [messages, setMessages] = useState(() => {
-    if (userPrompt && userPrompt.trim()) {
-      return [
-        { id: 'init-user', role: 'user', text: userPrompt.trim() },
-        {
-          id: 'init-ai',
-          role: 'ai',
-          text: "That sounds like a wonderful book! Tell me a little more about the setting, who was there, or any special moments you'd like to highlight."
-        }
-      ];
-    }
-    return [];
-  });
+  const [messages, setMessages] = useState([]);
+  const [completedTypingIds, setCompletedTypingIds] = useState(() => new Set());
 
   const [chatInput, setChatInput] = useState('');
   const [selectedChips, setSelectedChips] = useState([]);
@@ -195,68 +251,201 @@ export default function AIChatbotWidget({
     return ['Cherished Memories', 'A Collection of Moments', 'Captured Life', 'Our Story'];
   }, [suggestions, selectedOccasion, userPrompt]);
 
-  const handlePickOccasion = (title) => {
-    setSelectedOccasion(title);
-    setEditingStep(null);
-    setStyleAnswered(false);
-    const userMsg = { id: `u-${Date.now()}`, role: 'user', text: title };
-    const aiMsg = {
-      id: `a-${Date.now() + 1}`,
-      role: 'ai',
-      text: generateContextualReply(title, messages.length)
-    };
-    const nextMsgs = [...messages, userMsg, aiMsg];
-    setMessages(nextMsgs);
-    const nextPrompt = computeEffectivePrompt(nextMsgs, selectedChips);
-    setUserPrompt(nextPrompt);
-  };
-
-  const handleCustomOccasionSubmit = (e) => {
-    if (e) e.preventDefault();
-    const trimmed = customOccasionText.trim();
-    if (!trimmed) return;
-    handlePickOccasion(trimmed);
-    setCustomOccasionText('');
-  };
-
-  const handlePickStyle = (isCaptions) => {
-    setIncludeText(isCaptions);
-    setStyleAnswered(true);
-    setEditingStep(null);
-    if (!isCaptions) {
-      setUsePhotoVision(false);
-      setVisionAnswered(true);
-    } else {
-      setVisionAnswered(false);
-    }
-  };
-
-  const handlePickVision = (useVision) => {
-    setUsePhotoVision(useVision);
-    setVisionAnswered(true);
-    setEditingStep(null);
-  };
-
-  const handleConfirmTitle = () => {
-    if (!customTitle.trim()) {
-      setCustomTitle(defaultSuggestedTitles[0] || 'Cherished Memories');
-    }
-    if (!customSubtitle.trim()) {
-      setCustomSubtitle('A COLLECTION OF MEMORIES');
-    }
-    setTitleAnswered(true);
-    setEditingStep(null);
-  };
-
   // Local worker downsampling states
   const [isDownsampling, setIsDownsampling] = useState(false);
   const [downsampleStats, setDownsampleStats] = useState({ completed: 0, total: 0 });
   const [dragActive, setDragActive] = useState(false);
   const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
 
+  // Calculate inline upload numbers for Story Mode
+  const totalCount = isDownsampling
+    ? downsampleStats.total
+    : uploadedCount || reconciledPhotos.length;
+  const completedCount = isDownsampling
+    ? downsampleStats.completed
+    : isPhotoUploadComplete
+    ? totalCount
+    : ingestProgress.received || 0;
+  const survivedCount =
+    ingestProgress.survived ||
+    reconciledPhotos.filter((p) => p.status !== 'rejected').length;
+  const uploadPct =
+    totalCount > 0
+      ? Math.min(100, Math.round((completedCount / Math.max(1, totalCount)) * 100))
+      : 0;
+
+  const getStylePromptText = (occ) => {
+    const lower = (occ || '').toLowerCase();
+    if (lower.includes('trip') || lower.includes('travel') || lower.includes('vacation')) {
+      return 'A travel story! Which presentation style would you prefer for your pages?';
+    }
+    if (
+      lower.includes('everyday') ||
+      lower.includes('gallery') ||
+      lower.includes('casual') ||
+      lower.includes('random') ||
+      lower.includes('photos') ||
+      lower.includes("don't know") ||
+      lower.includes('dont know') ||
+      lower.includes('not sure')
+    ) {
+      return 'Everyday memories make wonderful keepsakes! Which presentation style would you prefer for your pages?';
+    }
+    if (lower.includes('family')) {
+      return 'Family moments are timeless. Which presentation style would you prefer for your pages?';
+    }
+    if (lower.includes('gift') || lower.includes('heartfelt')) {
+      return 'A special keepsake gift! Which presentation style would you prefer for your pages?';
+    }
+    if (lower.includes('milestone') || lower.includes('grad') || lower.includes('wedding')) {
+      return 'A great celebration! Which presentation style would you prefer for your pages?';
+    }
+    return 'Which presentation style would you prefer for your pages?';
+  };
+
+  const handlePickOccasion = (title) => {
+    setSelectedOccasion(title);
+    setStyleAnswered(false);
+    const userMsg = { id: `u-${Date.now()}`, role: 'user', text: title };
+    const nextAiMsg = {
+      id: `a-${Date.now() + 1}`,
+      role: 'ai',
+      step: 'style',
+      text: getStylePromptText(title)
+    };
+    const nextMsgs = [...messages, userMsg, nextAiMsg];
+    setMessages(nextMsgs);
+    const nextPrompt = computeEffectivePrompt(nextMsgs, selectedChips);
+    setUserPrompt(nextPrompt);
+    setTimeout(() => scrollToBottom('smooth'), 60);
+  };
+
+  const handlePickStyle = (isCaptions) => {
+    setIncludeText(isCaptions);
+    setStyleAnswered(true);
+    const choiceText = isCaptions ? 'Storytelling Captions' : 'Clean Photo-Forward';
+    const userMsg = { id: `u-${Date.now()}`, role: 'user', text: choiceText };
+
+    let nextAiMsg;
+    if (isCaptions) {
+      setUsePhotoVision(false);
+      setVisionAnswered(false);
+      nextAiMsg = {
+        id: `a-${Date.now() + 1}`,
+        role: 'ai',
+        step: 'vision',
+        text: 'Storytelling captions will add rich narrative context. Would you like our AI to inspect key photos with Gemini for personal captions?'
+      };
+    } else {
+      setUsePhotoVision(false);
+      setVisionAnswered(true);
+      nextAiMsg = {
+        id: `a-${Date.now() + 1}`,
+        role: 'ai',
+        step: 'title',
+        text: 'Clean photo-forward it is — pure visual focus. What should we title the cover of your book? Pick an idea below, type your own, or skip to use our default title:'
+      };
+    }
+    const nextMsgs = [...messages, userMsg, nextAiMsg];
+    setMessages(nextMsgs);
+    const nextPrompt = computeEffectivePrompt(nextMsgs, selectedChips);
+    setUserPrompt(nextPrompt);
+    setTimeout(() => scrollToBottom('smooth'), 60);
+  };
+
+  const handlePickVision = (useVision) => {
+    setUsePhotoVision(useVision);
+    setVisionAnswered(true);
+    const choiceText = useVision ? 'Yes, smart photo captions' : 'Fast chapter themes';
+    const userMsg = { id: `u-${Date.now()}`, role: 'user', text: choiceText };
+    const nextAiMsg = {
+      id: `a-${Date.now() + 1}`,
+      role: 'ai',
+      step: 'title',
+      text: 'What should we title the cover of your book? Pick an idea below, type your own, or skip to use our default title:'
+    };
+    const nextMsgs = [...messages, userMsg, nextAiMsg];
+    setMessages(nextMsgs);
+    const nextPrompt = computeEffectivePrompt(nextMsgs, selectedChips);
+    setUserPrompt(nextPrompt);
+    setTimeout(() => scrollToBottom('smooth'), 60);
+  };
+
+  const handleConfirmTitle = (chosenTitle, isSkipped = false) => {
+    const titleToUse = isSkipped
+      ? (defaultSuggestedTitles[0] || 'Cherished Memories')
+      : (chosenTitle || customTitle.trim() || defaultSuggestedTitles[0] || 'Cherished Memories');
+
+    setCustomTitle(titleToUse);
+    if (!customSubtitle.trim()) {
+      setCustomSubtitle('A COLLECTION OF MEMORIES');
+    }
+    setTitleAnswered(true);
+
+    const userText = isSkipped
+      ? 'Skip'
+      : (chosenTitle ? chosenTitle : `Cover Title: "${titleToUse}"`);
+    const userMsg = { id: `u-${Date.now()}`, role: 'user', text: userText };
+
+    const styleDesc = includeText
+      ? (usePhotoVision ? 'Storytelling Captions (AI Vision)' : 'Storytelling Captions')
+      : 'Clean Photo-Forward';
+    const pCount = survivedCount || totalCount;
+
+    const readyAiMsg = {
+      id: `a-${Date.now() + 1}`,
+      role: 'ai',
+      step: 'ready',
+      text: `Your book is ready! We'll create your edition with ${pCount} curated photos, ${styleDesc}, and titled "${titleToUse}".`
+    };
+
+    const nextMsgs = [...messages, userMsg, readyAiMsg];
+    setMessages(nextMsgs);
+    const nextPrompt = computeEffectivePrompt(nextMsgs, selectedChips);
+    setUserPrompt(nextPrompt);
+    setTimeout(() => scrollToBottom('smooth'), 60);
+  };
+
+  const handleRestartChoices = () => {
+    setStyleAnswered(false);
+    setVisionAnswered(false);
+    setTitleAnswered(false);
+    const retryAiMsg = {
+      id: `a-${Date.now()}`,
+      role: 'ai',
+      step: 'style',
+      text: 'Which presentation style would you prefer for your pages?'
+    };
+    setMessages(prev => [...prev, retryAiMsg]);
+    setTimeout(() => scrollToBottom('smooth'), 60);
+  };
+
   const fileInputRef = useRef(null);
   const threadEndRef = useRef(null);
   const downsamplerRef = useRef(null);
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
+
+  const scrollToBottom = useCallback((behavior = 'smooth') => {
+    if (threadEndRef.current) {
+      threadEndRef.current.scrollIntoView({ behavior, block: 'end' });
+    } else {
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior });
+    }
+  }, []);
+
+  // Listen to window scroll to show/hide scroll to bottom button
+  useEffect(() => {
+    const handleScroll = () => {
+      const scrollY = window.scrollY || document.documentElement.scrollTop;
+      const windowHeight = window.innerHeight;
+      const docHeight = document.documentElement.scrollHeight;
+      const distanceFromBottom = docHeight - (scrollY + windowHeight);
+      setShowScrollBottom(distanceFromBottom > 150);
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   if (!downsamplerRef.current) {
     downsamplerRef.current = new PixovoClientDownsampler({
@@ -271,9 +460,42 @@ export default function AIChatbotWidget({
     };
   }, []);
 
-  // Determine if user has entered the active conversational thread
-  const hasStartedStory =
-    messages.length > 0 || uploadedCount > 0 || isDownsampling || reconciledPhotos.length > 0;
+  // Determine if user has entered the active conversational thread (only after intro + photo animation complete)
+  const [isIntroDone, setIsIntroDone] = useState(false);
+  const hasStartedStory = isIntroDone;
+
+  // By default on story open, messages update, or option pick, scroll smoothly to bottom
+  useEffect(() => {
+    if (hasStartedStory) {
+      const timer = setTimeout(() => {
+        scrollToBottom('smooth');
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [
+    hasStartedStory,
+    messages,
+    selectedOccasion,
+    styleAnswered,
+    visionAnswered,
+    titleAnswered,
+    editingStep,
+    scrollToBottom
+  ]);
+
+  // Initialize Question 1 when story mode begins
+  useEffect(() => {
+    if (hasStartedStory && messages.length === 0 && !selectedOccasion && totalCount > 0) {
+      setMessages([
+        {
+          id: 'msg-q-occasion',
+          role: 'ai',
+          step: 'occasion',
+          text: 'What is this photo collection celebrating? Choose an occasion below, or type your own in the chat:'
+        }
+      ]);
+    }
+  }, [hasStartedStory, messages.length, selectedOccasion, totalCount]);
 
   // Build combined narrative prompt from user messages + selected chips
   const computeEffectivePrompt = (msgs = messages, chips = selectedChips) => {
@@ -283,56 +505,73 @@ export default function AIChatbotWidget({
     return (base + chipStr).trim() || userPrompt || 'Cherished Memories';
   };
 
-  const generateContextualReply = (text, currentTurnCount) => {
-    const lower = text.toLowerCase();
-    if (currentTurnCount === 0) {
-      if (
-        lower.includes('trip') ||
-        lower.includes('vacation') ||
-        lower.includes('travel') ||
-        lower.includes('getaway')
-      ) {
-        return "I'd love to help you capture that journey! Where did you travel, who joined you, and what were your favorite moments?";
-      }
-      if (lower.includes('gift') || lower.includes('heartfelt')) {
-        return 'A custom photo book makes an unforgettable keepsake. Who is this book for, and what memories or message are you celebrating?';
-      }
-      if (lower.includes('wedding') || lower.includes('love')) {
-        return 'Congratulations! Tell me about the celebration — the setting, the atmosphere, or the moments that meant the most.';
-      }
-      if (lower.includes('family') || lower.includes('milestone')) {
-        return 'Family stories are timeless. Which milestones, traditions, or everyday moments are we bringing together in this book?';
-      }
-      return 'That sounds like a wonderful story! Tell me a little more — who was there, where did it take place, or what mood should the book have?';
-    }
-    return "Got it — I've woven those details into your story direction. You can keep adding notes below, manage your photos, or tap 'Start creating my book' whenever you're ready.";
-  };
-
-  const handleStartWithOccasion = (card) => {
-    setSelectedOccasion(card.title);
-    setStyleAnswered(false);
-    const userMsg = { id: `u-${Date.now()}`, role: 'user', text: card.title };
-    const aiMsg = {
-      id: `a-${Date.now() + 1}`,
-      role: 'ai',
-      text: generateContextualReply(card.title, messages.length)
-    };
-    const nextMsgs = [...messages, userMsg, aiMsg];
-    setMessages(nextMsgs);
-    const nextPrompt = computeEffectivePrompt(nextMsgs, selectedChips);
-    setUserPrompt(nextPrompt);
-  };
-
   const handleSendMessage = (e) => {
     if (e) e.preventDefault();
     const trimmed = chatInput.trim();
     if (!trimmed) return;
 
+    if (!selectedOccasion) {
+      setSelectedOccasion(trimmed);
+      setStyleAnswered(false);
+      const userMsg = { id: `u-${Date.now()}`, role: 'user', text: trimmed };
+      const qStyleMsg = {
+        id: `a-${Date.now() + 1}`,
+        role: 'ai',
+        step: 'style',
+        text: getStylePromptText(trimmed)
+      };
+      const nextMsgs = [...messages, userMsg, qStyleMsg];
+      setMessages(nextMsgs);
+      setChatInput('');
+      const nextPrompt = computeEffectivePrompt(nextMsgs, selectedChips);
+      setUserPrompt(nextPrompt);
+      setTimeout(() => scrollToBottom('smooth'), 60);
+      return;
+    }
+
+    if (!styleAnswered) {
+      const lower = trimmed.toLowerCase();
+      if (lower.includes('caption') || lower.includes('story') || lower.includes('text')) {
+        setChatInput('');
+        handlePickStyle(true);
+        return;
+      }
+      if (lower.includes('photo') || lower.includes('clean') || lower.includes('no text')) {
+        setChatInput('');
+        handlePickStyle(false);
+        return;
+      }
+    }
+
+    if (styleAnswered && includeText && !visionAnswered) {
+      const lower = trimmed.toLowerCase();
+      if (lower.includes('yes') || lower.includes('smart') || lower.includes('vision') || lower.includes('gemini')) {
+        setChatInput('');
+        handlePickVision(true);
+        return;
+      }
+      if (lower.includes('no') || lower.includes('fast') || lower.includes('theme') || lower.includes('skip')) {
+        setChatInput('');
+        handlePickVision(false);
+        return;
+      }
+    }
+
+    if (styleAnswered && (!includeText || visionAnswered) && !titleAnswered) {
+      setChatInput('');
+      if (trimmed.toLowerCase() === 'skip') {
+        handleConfirmTitle(null, true);
+      } else {
+        handleConfirmTitle(trimmed, false);
+      }
+      return;
+    }
+
     const userMsg = { id: `u-${Date.now()}`, role: 'user', text: trimmed };
     const aiMsg = {
       id: `a-${Date.now() + 1}`,
       role: 'ai',
-      text: generateContextualReply(trimmed, messages.length)
+      text: "Got it — I've noted that preference for your book design. Tap 'Create My Story Book' whenever you're ready!"
     };
     const nextMsgs = [...messages, userMsg, aiMsg];
     setMessages(nextMsgs);
@@ -342,8 +581,8 @@ export default function AIChatbotWidget({
     setUserPrompt(nextPrompt);
 
     setTimeout(() => {
-      threadEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }, 80);
+      scrollToBottom('smooth');
+    }, 60);
   };
 
   const handleToggleFollowupChip = (chip) => {
@@ -372,21 +611,6 @@ export default function AIChatbotWidget({
       return;
     }
 
-    // If user jumped straight to uploading photos before picking an occasion, add a welcoming turn
-    if (messages.length === 0) {
-      setMessages([
-        {
-          id: `u-photos-${Date.now()}`,
-          role: 'user',
-          text: `Added ${fileList.length} photos to start my book`
-        },
-        {
-          id: `a-photos-${Date.now() + 1}`,
-          role: 'ai',
-          text: "Wonderful! While your photos are being curated, tell me a little about the story behind them — what's the occasion or mood?"
-        }
-      ]);
-    }
 
     setIsDownsampling(true);
     setDownsampleStats({ completed: 0, total: fileList.length });
@@ -530,32 +754,22 @@ export default function AIChatbotWidget({
     });
   };
 
-  // Calculate inline upload numbers for Story Mode strip
-  const totalCount = isDownsampling
-    ? downsampleStats.total
-    : uploadedCount || reconciledPhotos.length;
-  const completedCount = isDownsampling
-    ? downsampleStats.completed
-    : isPhotoUploadComplete
-    ? totalCount
-    : ingestProgress.received || 0;
-  const survivedCount =
-    ingestProgress.survived ||
-    reconciledPhotos.filter((p) => p.status !== 'rejected').length;
-  const uploadPct =
-    totalCount > 0
-      ? Math.min(100, Math.round((completedCount / Math.max(1, totalCount)) * 100))
-      : 0;
-
-  const inlineStripThumbs = reconciledPhotos.slice(0, 8);
-  const shimmerPlaceholderCount =
-    !isPhotoUploadComplete || isDownsampling
-      ? Math.max(2, Math.min(4, totalCount - inlineStripThumbs.length))
-      : 0;
-
   return (
     <div
-      className={hasStartedStory ? "mx-story-shell" : "mx-hero-shell-wrap"}
+      className={hasStartedStory ? "pixovo-story-root mx-story-shell" : "pixovo-story-root mx-hero-shell-wrap"}
+      style={{
+        width: '100%',
+        maxWidth: '100%',
+        margin: 0,
+        padding: 0,
+        background: 'transparent',
+        border: 'none',
+        borderRadius: 0,
+        boxShadow: 'none',
+        overflow: 'visible',
+        transform: 'none',
+        animation: 'none'
+      }}
       onDragEnter={handleDrag}
       onDragOver={handleDrag}
       onDragLeave={handleDrag}
@@ -577,21 +791,9 @@ export default function AIChatbotWidget({
           ================================================================= */}
       {!hasStartedStory && (
         <PixovoStoryIntro
-          onSelectOccasion={handleStartWithOccasion}
-          onStorySubmit={(text) => {
-            const userMsg = { id: `u-${Date.now()}`, role: 'user', text };
-            const aiMsg = {
-              id: `a-${Date.now() + 1}`,
-              role: 'ai',
-              text: generateContextualReply(text, 0)
-            };
-            const nextMsgs = [userMsg, aiMsg];
-            setMessages(nextMsgs);
-            setUserPrompt(text);
-          }}
-          onTriggerFilePicker={triggerFilePicker}
-          dragActive={dragActive}
-          isLoading={isLoading}
+          onPhotosSelected={handleFilesSelected}
+          onReadyForChat={() => setIsIntroDone(true)}
+          isLoading={isLoading || isDownsampling}
         />
       )}
 
@@ -599,7 +801,20 @@ export default function AIChatbotWidget({
           SCREEN 2: CLEAN, WARM STORY CONVERSATION & PHOTO CURATION
           ================================================================= */}
       {hasStartedStory && (
-        <div className="pixovo-chat-shell">
+        <div
+          className="pixovo-chat-shell"
+          style={{
+            backgroundColor: '#F7F4F0',
+            background: '#F7F4F0',
+            border: 'none',
+            borderRadius: 0,
+            boxShadow: 'none',
+            outline: 'none',
+            width: '100%',
+            minHeight: '100vh',
+            transform: 'none'
+          }}
+        >
           {/* Top Stage Bar with Back navigation & Photo count */}
           <div className="pixovo-chat-top-bar">
             <button
@@ -612,34 +827,31 @@ export default function AIChatbotWidget({
                 setVisionAnswered(false);
                 setTitleAnswered(false);
                 setEditingStep(null);
+                setUserPrompt('');
+                setCompletedTypingIds(new Set());
+                setIsIntroDone(false);
               }}
               title="Return to Story Selector"
             >
               <ArrowLeft size={14} strokeWidth={2.4} />
               <span>Back to Story Selector</span>
             </button>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-              {totalCount > 0 && (
-                <button
-                  type="button"
-                  className="pixovo-chat-chip"
-                  onClick={() => setIsPhotoModalOpen(true)}
-                  title="View and manage selected photos"
-                >
-                  <ImageIcon size={13} color="#0BA28D" />
-                  <span>{survivedCount} Photos</span>
-                </button>
-              )}
-              <span className="pixovo-chat-stage-pill">
-                <Heart size={13} strokeWidth={2.2} color="#0BA28D" />
-                <span>pixovo · Story Mode</span>
-              </span>
-            </div>
+            {totalCount > 0 && !isPhotoModalOpen && (
+              <button
+                type="button"
+                className="pixovo-left-media-trigger-btn"
+                onClick={() => setIsPhotoModalOpen(true)}
+                title="Open Media Tab on left"
+              >
+                <ImageIcon size={14} color="#0BA28D" />
+                <span>Media ({survivedCount || totalCount})</span>
+              </button>
+            )}
           </div>
 
           {/* Centered Single-Column Conversational Question & Pick Stream */}
           <div className="pixovo-chat-stream">
-            {/* Conversation History / Photo Greeting */}
+            {/* Conversation History & In-Stream Choice Actions */}
             {messages.map((msg, idx) => {
               if (msg.role === 'user') {
                 return (
@@ -650,510 +862,175 @@ export default function AIChatbotWidget({
               }
               return (
                 <div key={msg.id || idx} className="pixovo-chat-ai-row">
-                  <div className="pixovo-chat-ai-head">
-                    <Sparkles size={13} strokeWidth={2.4} />
-                    <span>Story Companion</span>
+                  <div className="pixovo-chat-ai-avatar">
+                    <Sparkles size={15} strokeWidth={2.2} />
                   </div>
-                  <p className="pixovo-chat-ai-text">{msg.text}</p>
-
-                  {/* Compact Photo Strip attached to the welcoming turn */}
-                  {idx === 1 && totalCount > 0 && (
-                    <div style={{ marginTop: '0.4rem' }}>
-                      <div className="pixovo-compact-photo-strip">
-                        {inlineStripThumbs.slice(0, 6).map((item) => (
-                          <div
-                            key={item.photo_id}
-                            className="pixovo-compact-photo-thumb"
-                            onClick={() => setIsPhotoModalOpen(true)}
-                            title={item.filename}
-                          >
-                            <PhotoFrame
-                              src={item.url}
-                              aspectRatio={1}
-                              dominantColors={item.dominant_colors}
-                              alt={item.filename}
-                              style={{ width: '100%', height: '100%' }}
-                            />
-                          </div>
-                        ))}
-                        {reconciledPhotos.length > 6 && (
-                          <button
-                            type="button"
-                            className="pixovo-chat-chip"
-                            onClick={() => setIsPhotoModalOpen(true)}
-                            style={{ height: '44px', borderRadius: '10px' }}
-                          >
-                            +{reconciledPhotos.length - 6} more
-                          </button>
-                        )}
-                      </div>
-
-                      {/* Mini Scanning / Curation Progress if in progress */}
-                      {(!isPhotoUploadComplete || isDownsampling) && (
-                        <div style={{ marginTop: '0.6rem' }}>
-                          <div
-                            style={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              fontSize: '0.76rem',
-                              color: '#7E8D9E',
-                              marginBottom: '0.3rem'
-                            }}
-                          >
-                            <span>Scanning &amp; Curating Memories</span>
-                            <span style={{ color: '#0BA28D', fontWeight: 700 }}>{uploadPct}%</span>
-                          </div>
-                          <div className="pixovo-chat-progress-track">
-                            <div
-                              className="pixovo-chat-progress-fill"
-                              style={{ width: `${Math.max(8, uploadPct)}%` }}
-                            />
-                          </div>
+                  <div className="pixovo-chat-ai-content">
+                    <PixovoTypewriterMessage
+                      text={msg.text}
+                      speed={16}
+                      isLatest={idx === messages.length - 1}
+                      isCompleted={completedTypingIds.has(msg.id || idx)}
+                      onComplete={() => {
+                        setCompletedTypingIds((prev) => new Set(prev).add(msg.id || idx));
+                        setTimeout(() => scrollToBottom('smooth'), 50);
+                      }}
+                      readyContent={
+                        msg.step === 'ready' ? (
+                          <p className="pixovo-chat-ai-text">
+                            Your book is ready! We'll create your edition with <strong>{survivedCount || totalCount} curated photos</strong>, <strong>{includeText ? (usePhotoVision ? 'Storytelling Captions (AI Vision)' : 'Storytelling Captions') : 'Clean Photo-Forward'}</strong>, and titled <strong>"{customTitle || defaultSuggestedTitles[0] || 'Cherished Memories'}"</strong>.
+                          </p>
+                        ) : null
+                      }
+                    >
+                      {/* Step 1: Occasion Pills (only shown if occasion not yet answered) */}
+                      {msg.step === 'occasion' && !selectedOccasion && (
+                        <div className="pixovo-pill-options" style={{ marginTop: '0.65rem' }}>
+                          {[
+                            { id: 'trip', title: '🌴 My last trip' },
+                            { id: 'gift', title: '🎁 A heartfelt gift' },
+                            { id: 'milestone', title: '🎓 A big milestone' },
+                            { id: 'family', title: '👨‍👩‍👧 Family moments' },
+                            { id: 'everyday', title: '📷 Everyday memories' }
+                          ].map((item) => (
+                            <button
+                              key={item.id}
+                              type="button"
+                              className="pixovo-choice-pill"
+                              onClick={() => handlePickOccasion(item.title)}
+                            >
+                              {item.title}
+                            </button>
+                          ))}
                         </div>
                       )}
-                    </div>
-                  )}
+
+                      {/* Step 2: Presentation Style Pills (only on active question) */}
+                      {msg.step === 'style' && !styleAnswered && idx === messages.length - 1 && (
+                        <div className="pixovo-pill-options">
+                          <button
+                            type="button"
+                            className="pixovo-choice-pill"
+                            onClick={() => handlePickStyle(true)}
+                          >
+                            <BookOpen size={14} color="#0BA28D" />
+                            <span>Storytelling Captions</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="pixovo-choice-pill"
+                            onClick={() => handlePickStyle(false)}
+                          >
+                            <ImageIcon size={14} color="#0BA28D" />
+                            <span>Clean Photo-Forward</span>
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Step 3: Smart Captions Pills (only on active question) */}
+                      {msg.step === 'vision' && !visionAnswered && idx === messages.length - 1 && (
+                        <div className="pixovo-pill-options">
+                          <button
+                            type="button"
+                            className="pixovo-choice-pill"
+                            onClick={() => handlePickVision(true)}
+                          >
+                            <Sparkles size={14} color="#0BA28D" />
+                            <span>Yes, smart photo captions</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="pixovo-choice-pill"
+                            onClick={() => handlePickVision(false)}
+                          >
+                            <RefreshCw size={14} color="#0BA28D" />
+                            <span>Fast chapter themes</span>
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Step 4: Cover Title Pills + SKIP Option (only on active question) */}
+                      {msg.step === 'title' && !titleAnswered && idx === messages.length - 1 && (
+                        <div className="pixovo-pill-options">
+                          {defaultSuggestedTitles.map((title, tIdx) => (
+                            <button
+                              key={tIdx}
+                              type="button"
+                              className="pixovo-choice-pill"
+                              onClick={() => handleConfirmTitle(title, false)}
+                            >
+                              {title}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            className="pixovo-choice-pill pixovo-skip-pill"
+                            onClick={() => handleConfirmTitle(null, true)}
+                            title="Skip choosing a custom title"
+                          >
+                            <SkipForward size={14} color="#0BA28D" />
+                            <span>Skip</span>
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Step 5: Ready to create book (only on ready step or final active state) */}
+                      {(msg.step === 'ready' || (titleAnswered && idx === messages.length - 1)) && (
+                        <div className="pixovo-pill-options" style={{ marginTop: '0.4rem' }}>
+                          <button
+                            type="button"
+                            className="pixovo-chat-launch-btn"
+                            onClick={handleLaunchBookCreation}
+                            disabled={isLoading || isDownsampling}
+                          >
+                            <Sparkles size={16} strokeWidth={2.2} />
+                            <span>Create My Story Book</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="pixovo-choice-pill"
+                            onClick={handleRestartChoices}
+                            title="Adjust settings"
+                          >
+                            <Edit3 size={13} />
+                            <span>Change choices</span>
+                          </button>
+                        </div>
+                      )}
+                    </PixovoTypewriterMessage>
+                  </div>
                 </div>
               );
             })}
 
-            {/* Photo Dropzone Prompt if user arrived here without any photos yet */}
+            {/* If 0 photos and user entered chat, prompt them gently without any big dashed box */}
             {totalCount === 0 && !isDownsampling && (
-              <div
-                className="pixovo-step-card"
-                onClick={triggerFilePicker}
-                style={{
-                  cursor: 'pointer',
-                  border: '1.5px dashed rgba(11, 162, 141, 0.35)',
-                  background: '#E8F6F4',
-                  textAlign: 'center',
-                  padding: '2rem'
-                }}
-              >
-                <UploadCloud size={36} color="#0BA28D" style={{ margin: '0 auto 0.5rem' }} />
-                <h4 style={{ margin: '0 0 0.25rem', fontSize: '1.05rem', fontWeight: 700, color: '#1F2937' }}>
-                  Tap to add your photos to begin
-                </h4>
-                <p style={{ margin: 0, fontSize: '0.82rem', color: '#7E8D9E' }}>
-                  Fast local curation • Automatically filters blurs and duplicates
-                </p>
-              </div>
-            )}
-
-            {/* =================================================================
-                QUESTION 1: OCCASION / STORY THEME
-                ================================================================= */}
-            {selectedOccasion && editingStep !== 'occasion' ? (
-              <div className="pixovo-step-card">
-                <div className="pixovo-answered-pill">
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <Check size={16} color="#0BA28D" strokeWidth={2.5} />
-                    <span>Story Theme: <strong>{selectedOccasion}</strong></span>
-                  </span>
-                  <button
-                    type="button"
-                    className="pixovo-change-btn"
-                    onClick={() => setEditingStep('occasion')}
-                  >
-                    <Edit3 size={13} />
-                    <span>Change</span>
-                  </button>
+              <div className="pixovo-chat-ai-row">
+                <div className="pixovo-chat-ai-avatar">
+                  <Sparkles size={15} strokeWidth={2.2} />
+                </div>
+                <div className="pixovo-chat-ai-content">
+                  <p className="pixovo-chat-ai-text">
+                    Welcome to Story Mode! To get started on your photobook, tap the photo icon in the bar below or drop your images anywhere on this page.
+                  </p>
                 </div>
               </div>
-            ) : (
-              <div className="pixovo-step-card active-step">
-                <div className="pixovo-step-header">
-                  <span className="pixovo-step-badge">Question 1</span>
-                  {selectedOccasion && (
-                    <button
-                      type="button"
-                      className="pixovo-change-btn"
-                      onClick={() => setEditingStep(null)}
-                    >
-                      Keep Current
-                    </button>
-                  )}
-                </div>
-                <h3 className="pixovo-step-title">What is this photo collection celebrating?</h3>
-                <p className="pixovo-step-sub">Pick the occasion or mood that best fits your story:</p>
-
-                <div className="pixovo-step-options">
-                  {[
-                    { id: 'trip', title: '🌴 My last trip', sub: 'Road trips, vacations & scenic adventures' },
-                    { id: 'gift', title: '🎁 A heartfelt gift', sub: 'For someone special & cherished' },
-                    { id: 'milestone', title: '🎓 A big milestone', sub: 'Graduations, weddings & accomplishments' },
-                    { id: 'family', title: '👨‍👩‍👧 Family moments', sub: 'Everyday love, reunions & memories' }
-                  ].map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className={`pixovo-pick-btn ${selectedOccasion === item.title ? 'selected' : ''}`}
-                      onClick={() => handlePickOccasion(item.title)}
-                    >
-                      <div className="pixovo-pick-head">
-                        <span>{item.title}</span>
-                        {selectedOccasion === item.title && (
-                          <Check size={16} color="#0BA28D" strokeWidth={2.5} />
-                        )}
-                      </div>
-                      <div className="pixovo-pick-sub">{item.sub}</div>
-                    </button>
-                  ))}
-                </div>
-
-                {/* Direct text option */}
-                <form
-                  onSubmit={handleCustomOccasionSubmit}
-                  style={{ display: 'flex', gap: '0.5rem', marginTop: '0.2rem' }}
-                >
-                  <input
-                    type="text"
-                    className="pixovo-step-text-input"
-                    placeholder="Or type your own story theme in text..."
-                    value={customOccasionText}
-                    onChange={(e) => setCustomOccasionText(e.target.value)}
-                  />
-                  <button
-                    type="submit"
-                    className="pixovo-step-action-btn"
-                    disabled={!customOccasionText.trim()}
-                  >
-                    Set
-                  </button>
-                </form>
-              </div>
             )}
-
-            {/* =================================================================
-                QUESTION 2: EDITORIAL PRESENTATION STYLE
-                ================================================================= */}
-            {selectedOccasion && (
-              styleAnswered && editingStep !== 'style' ? (
-                <div className="pixovo-step-card">
-                  <div className="pixovo-answered-pill">
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <Check size={16} color="#0BA28D" strokeWidth={2.5} />
-                      <span>
-                        Style: <strong>{includeText ? 'Storytelling Captions' : 'Clean Photo-Forward'}</strong>
-                      </span>
-                    </span>
-                    <button
-                      type="button"
-                      className="pixovo-change-btn"
-                      onClick={() => setEditingStep('style')}
-                    >
-                      <Edit3 size={13} />
-                      <span>Change</span>
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="pixovo-step-card active-step">
-                  <div className="pixovo-step-header">
-                    <span className="pixovo-step-badge">Question 2</span>
-                    {styleAnswered && (
-                      <button
-                        type="button"
-                        className="pixovo-change-btn"
-                        onClick={() => setEditingStep(null)}
-                      >
-                        Keep Current
-                      </button>
-                    )}
-                  </div>
-                  <h3 className="pixovo-step-title">Which presentation style would you like for your pages?</h3>
-                  <p className="pixovo-step-sub">Choose how your photos and story narrative should appear:</p>
-
-                  <div className="pixovo-step-options">
-                    <button
-                      type="button"
-                      className={`pixovo-pick-btn ${includeText && styleAnswered ? 'selected' : ''}`}
-                      onClick={() => handlePickStyle(true)}
-                    >
-                      <div className="pixovo-pick-head">
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                          <BookOpen size={16} color="#0BA28D" />
-                          Storytelling Captions
-                        </span>
-                        {includeText && styleAnswered && (
-                          <Check size={16} color="#0BA28D" strokeWidth={2.5} />
-                        )}
-                      </div>
-                      <div className="pixovo-pick-sub">
-                        Pairs AI-crafted narrative captions and chapter headers alongside your photos.
-                      </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      className={`pixovo-pick-btn ${!includeText && styleAnswered ? 'selected' : ''}`}
-                      onClick={() => handlePickStyle(false)}
-                    >
-                      <div className="pixovo-pick-head">
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                          <ImageIcon size={16} color="#0BA28D" />
-                          Clean Photo-Forward
-                        </span>
-                        {!includeText && styleAnswered && (
-                          <Check size={16} color="#0BA28D" strokeWidth={2.5} />
-                        )}
-                      </div>
-                      <div className="pixovo-pick-sub">
-                        Dedicates 100% of every spread to full-bleed photography with zero text boxes.
-                      </div>
-                    </button>
-                  </div>
-                </div>
-              )
-            )}
-
-            {/* =================================================================
-                QUESTION 3: SMART PHOTO VISION CAPTIONS (Only if includeText)
-                ================================================================= */}
-            {selectedOccasion && styleAnswered && includeText && (
-              visionAnswered && editingStep !== 'vision' ? (
-                <div className="pixovo-step-card">
-                  <div className="pixovo-answered-pill">
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <Check size={16} color="#0BA28D" strokeWidth={2.5} />
-                      <span>
-                        Captions: <strong>{usePhotoVision ? 'Smart Photo Vision (Gemini)' : 'Fast Chapter Themes'}</strong>
-                      </span>
-                    </span>
-                    <button
-                      type="button"
-                      className="pixovo-change-btn"
-                      onClick={() => setEditingStep('vision')}
-                    >
-                      <Edit3 size={13} />
-                      <span>Change</span>
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="pixovo-step-card active-step">
-                  <div className="pixovo-step-header">
-                    <span className="pixovo-step-badge">Question 3</span>
-                    {visionAnswered && (
-                      <button
-                        type="button"
-                        className="pixovo-change-btn"
-                        onClick={() => setEditingStep(null)}
-                      >
-                        Keep Current
-                      </button>
-                    )}
-                  </div>
-                  <h3 className="pixovo-step-title">Would you like AI to inspect key photos for personal captions?</h3>
-                  <p className="pixovo-step-sub">Select how deep AI should analyze your photos:</p>
-
-                  <div className="pixovo-step-options">
-                    <button
-                      type="button"
-                      className={`pixovo-pick-btn ${usePhotoVision && visionAnswered ? 'selected' : ''}`}
-                      onClick={() => handlePickVision(true)}
-                    >
-                      <div className="pixovo-pick-head">
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                          <Sparkles size={16} color="#0BA28D" />
-                          Yes, smart photo captions
-                        </span>
-                        {usePhotoVision && visionAnswered && (
-                          <Check size={16} color="#0BA28D" strokeWidth={2.5} />
-                        )}
-                      </div>
-                      <div className="pixovo-pick-sub">
-                        Sends ~3 key photos per chapter to Google Gemini for contextual narrative captions.
-                      </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      className={`pixovo-pick-btn ${!usePhotoVision && visionAnswered ? 'selected' : ''}`}
-                      onClick={() => handlePickVision(false)}
-                    >
-                      <div className="pixovo-pick-head">
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                          <RefreshCw size={16} color="#0BA28D" />
-                          Fast chapter themes
-                        </span>
-                        {!usePhotoVision && visionAnswered && (
-                          <Check size={16} color="#0BA28D" strokeWidth={2.5} />
-                        )}
-                      </div>
-                      <div className="pixovo-pick-sub">
-                        Generates chapter themes using your story notes without sending photos to Gemini.
-                      </div>
-                    </button>
-                  </div>
-                </div>
-              )
-            )}
-
-            {/* =================================================================
-                QUESTION 4: BOOK COVER TITLE & SUBTITLE
-                ================================================================= */}
-            {selectedOccasion && styleAnswered && (!includeText || visionAnswered) && (
-              titleAnswered && editingStep !== 'title' ? (
-                <div className="pixovo-step-card">
-                  <div className="pixovo-answered-pill">
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <Check size={16} color="#0BA28D" strokeWidth={2.5} />
-                      <span>
-                        Cover Title: <strong>"{customTitle || defaultSuggestedTitles[0]}"</strong>
-                        {customSubtitle ? ` • ${customSubtitle}` : ''}
-                      </span>
-                    </span>
-                    <button
-                      type="button"
-                      className="pixovo-change-btn"
-                      onClick={() => setEditingStep('title')}
-                    >
-                      <Edit3 size={13} />
-                      <span>Change</span>
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="pixovo-step-card active-step">
-                  <div className="pixovo-step-header">
-                    <span className="pixovo-step-badge">
-                      Step {includeText ? '4' : '3'}
-                    </span>
-                    <button
-                      type="button"
-                      className="pixovo-change-btn"
-                      onClick={handleSuggestTitles}
-                      disabled={isSuggestingTitles}
-                    >
-                      {isSuggestingTitles ? (
-                        <RefreshCw size={12} className="animate-spin" />
-                      ) : (
-                        <Sparkles size={12} />
-                      )}
-                      <span>Suggest Titles</span>
-                    </button>
-                  </div>
-                  <h3 className="pixovo-step-title">What should we title the cover of your book?</h3>
-                  <p className="pixovo-step-sub">Pick an AI-suggested title or enter your own custom text:</p>
-
-                  {/* Clickable Title Chips to Pick */}
-                  <div className="pixovo-chat-floating-chips" style={{ padding: 0 }}>
-                    {defaultSuggestedTitles.map((title, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        className={`pixovo-chat-chip ${customTitle === title ? 'active' : ''}`}
-                        onClick={() => {
-                          setCustomTitle(title);
-                          if (!customSubtitle) setCustomSubtitle('A COLLECTION OF MEMORIES');
-                        }}
-                      >
-                        {title}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Direct Text Inputs */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-                    <input
-                      type="text"
-                      className="pixovo-step-text-input"
-                      placeholder="Cover title (or pick a suggestion above)..."
-                      value={customTitle}
-                      onChange={(e) => setCustomTitle(e.target.value)}
-                    />
-                    <input
-                      type="text"
-                      className="pixovo-step-text-input"
-                      placeholder="Optional subtitle (e.g. SUMMER 2026)..."
-                      value={customSubtitle}
-                      onChange={(e) => setCustomSubtitle(e.target.value)}
-                    />
-                  </div>
-
-                  <button
-                    type="button"
-                    className="pixovo-step-action-btn"
-                    onClick={handleConfirmTitle}
-                  >
-                    <span>Confirm Title &amp; Continue</span>
-                    <ArrowRight size={15} />
-                  </button>
-                </div>
-              )
-            )}
-
-            {/* =================================================================
-                STEP 5: REVIEW & READY TO CREATE BOOK
-                ================================================================= */}
-            {selectedOccasion && styleAnswered && (!includeText || visionAnswered) && titleAnswered && (
-              <div className="pixovo-recipe-card">
-                <div className="pixovo-step-header">
-                  <span className="pixovo-step-badge">
-                    <Sparkles size={12} />
-                    <span>Ready to Create</span>
-                  </span>
-                  <span style={{ fontSize: '0.8rem', color: '#0BA28D', fontWeight: 700 }}>
-                    All Settings Configured
-                  </span>
-                </div>
-
-                <h3 className="pixovo-step-title" style={{ fontSize: '1.25rem' }}>
-                  Your custom book recipe is ready!
-                </h3>
-
-                <div className="pixovo-recipe-grid">
-                  <div className="pixovo-recipe-item">
-                    <span className="pixovo-recipe-label">Photos</span>
-                    <span className="pixovo-recipe-val">
-                      {survivedCount > 0 ? `${survivedCount} curated` : '0 selected'}
-                    </span>
-                  </div>
-
-                  <div className="pixovo-recipe-item">
-                    <span className="pixovo-recipe-label">Page Style</span>
-                    <span className="pixovo-recipe-val">
-                      {includeText ? 'Storytelling Captions' : 'Clean Photo-Forward'}
-                    </span>
-                  </div>
-
-                  <div className="pixovo-recipe-item">
-                    <span className="pixovo-recipe-label">AI Vision</span>
-                    <span className="pixovo-recipe-val">
-                      {includeText ? (usePhotoVision ? 'Gemini Smart Captions' : 'Fast Theme Layout') : 'Off (Photo-Forward)'}
-                    </span>
-                  </div>
-
-                  <div className="pixovo-recipe-item">
-                    <span className="pixovo-recipe-label">Cover Title</span>
-                    <span className="pixovo-recipe-val" title={customTitle || 'A Collection of Memories'}>
-                      "{customTitle || defaultSuggestedTitles[0] || 'A Collection of Memories'}"
-                    </span>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  className="pixovo-chat-launch-btn"
-                  style={{
-                    width: '100%',
-                    justifyContent: 'center',
-                    padding: '0.95rem 1.6rem',
-                    fontSize: '1.02rem',
-                    borderRadius: '16px'
-                  }}
-                  onClick={handleLaunchBookCreation}
-                  disabled={isLoading || isDownsampling}
-                >
-                  <Sparkles size={18} strokeWidth={2.2} />
-                  <span>Start Creating My Book</span>
-                </button>
-              </div>
-            )}
-
             <div ref={threadEndRef} />
           </div>
+
+          {/* FLOATING SCROLL TO BOTTOM BUTTON (ChatGPT / Gemini style) */}
+          {showScrollBottom && (
+            <button
+              type="button"
+              className="pixovo-scroll-bottom-btn"
+              onClick={() => scrollToBottom('smooth')}
+              aria-label="Scroll to bottom"
+              title="Scroll to bottom"
+            >
+              <ChevronDown size={18} strokeWidth={2.5} />
+            </button>
+          )}
 
           {/* FLOATING NO-BOUNDARY BOTTOM DOCK WITH AMBIENT GLOW */}
           <div className="pixovo-chat-bottom-bar">
@@ -1162,31 +1039,30 @@ export default function AIChatbotWidget({
                 <div className="pixovo-clean-dock-glow" />
 
                 <form className="pixovo-chat-input-wrap" onSubmit={handleSendMessage}>
+                  {/* Media button strictly on left side */}
                   <button
                     type="button"
-                    className="pixovo-chat-chip"
+                    className={`pixovo-chat-media-btn ${isPhotoModalOpen ? 'active' : ''}`}
                     onClick={() => {
-                      if (totalCount > 0) setIsPhotoModalOpen(true);
+                      if (totalCount > 0) setIsPhotoModalOpen((prev) => !prev);
                       else triggerFilePicker();
                     }}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '0.45rem',
-                      padding: '0.42rem 0.85rem'
-                    }}
-                    title="Upload or manage photos"
+                    title={totalCount > 0 ? (isPhotoModalOpen ? "Close Media Tab" : `Open Media Tab (${survivedCount || totalCount} photos)`) : "Upload photos"}
+                    aria-label="Toggle Media Tab"
                   >
-                    <ImageIcon size={15} color="#0BA28D" />
-                    <span>Photos {totalCount > 0 ? `(${survivedCount})` : ''}</span>
+                    <ImageIcon size={17} strokeWidth={2.2} color="#0BA28D" />
                   </button>
 
                   <input
                     type="text"
                     className="pixovo-chat-input"
                     value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    placeholder="Add story notes, custom requests, or memories..."
+                    onFocus={() => scrollToBottom('smooth')}
+                    onChange={(e) => {
+                      setChatInput(e.target.value);
+                      scrollToBottom('smooth');
+                    }}
+                    placeholder="Ask a question, add details, or customize your book..."
                     disabled={isLoading}
                   />
 
@@ -1227,66 +1103,61 @@ export default function AIChatbotWidget({
 
 
       {/* =================================================================
-          PHOTO MANAGER DRAWER MODAL (When user taps "Photos")
+          LEFT EMPTY SPACE MEDIA TAB (Opens on left side empty space only)
           ================================================================= */}
       {isPhotoModalOpen && (
-        <div className="mx-modal-backdrop" onClick={() => setIsPhotoModalOpen(false)}>
-          <div className="mx-modal-sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="mx-modal-header">
-              <div>
-                <h3
-                  style={{
-                    fontSize: '1.1rem',
-                    fontWeight: 700,
-                    color: 'var(--px-text-primary)'
-                  }}
-                >
-                  Your Book Photos ({survivedCount} Kept / {totalCount} Total)
-                </h3>
-                <p style={{ fontSize: '0.82rem', color: 'var(--px-text-secondary)' }}>
-                  {isPhotoUploadComplete
-                    ? 'Smart quality curation complete. Dimmed photos were filtered for blur or duplication.'
-                    : `Uploading & analysing quality (${completedCount} of ${totalCount})...`}
-                </p>
+        <>
+          {/* Mobile-only backdrop (hidden on desktop so left empty space is unobstructed) */}
+          <div
+            className="pixovo-media-mobile-backdrop"
+            onClick={() => setIsPhotoModalOpen(false)}
+          />
+
+          <aside className="pixovo-media-left-tab" aria-label="Media tab">
+            <div className="pixovo-media-left-tab-header">
+              <div className="pixovo-media-left-tab-title">
+                <ImageIcon size={17} color="#0BA28D" />
+                <span>Media</span>
+                <span className="pixovo-media-tab-badge">
+                  {survivedCount || totalCount}
+                </span>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <div className="pixovo-media-left-tab-actions">
                 <button
                   type="button"
-                  className="btn btn-secondary"
-                  style={{ padding: '0.45rem 0.95rem', fontSize: '0.82rem' }}
-                  onClick={() => {
-                    setIsPhotoModalOpen(false);
-                    triggerFilePicker();
-                  }}
+                  className="pixovo-media-left-tab-add-btn"
+                  onClick={triggerFilePicker}
+                  title="Add or replace photos"
                 >
-                  <Plus size={15} />
-                  <span>Replace / Add Batch</span>
+                  <Plus size={14} />
+                  <span>Add</span>
                 </button>
                 <button
                   type="button"
-                  className="mx-header-close-btn"
+                  className="pixovo-media-left-tab-close-btn"
                   onClick={() => setIsPhotoModalOpen(false)}
-                  aria-label="Close photo manager"
+                  aria-label="Close media tab"
+                  title="Close media tab"
                 >
-                  <X size={18} />
+                  <X size={16} />
                 </button>
               </div>
             </div>
 
-            <div className="mx-modal-body">
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))',
-                  gap: '0.65rem'
-                }}
-              >
+            <div className="pixovo-media-left-tab-sub">
+              <span>{isPhotoUploadComplete ? `${survivedCount} curated photos` : `Curating (${completedCount}/${totalCount})...`}</span>
+              {(!isPhotoUploadComplete || isDownsampling) && (
+                <span style={{ color: '#0BA28D', fontWeight: 700 }}>{uploadPct}%</span>
+              )}
+            </div>
+
+            <div className="pixovo-media-left-tab-body">
+              <div className="pixovo-media-left-tab-grid">
                 {reconciledPhotos.map((item) => (
                   <div
                     key={item.photo_id}
-                    className={`curation-tile curation-tile-${item.status}`}
-                    style={{ width: '100%', height: '96px', borderRadius: '10px' }}
+                    className={`pixovo-media-left-tab-tile curation-tile-${item.status}`}
                     title={
                       item.status === 'rejected'
                         ? item.reject_reason || 'filtered'
@@ -1298,7 +1169,7 @@ export default function AIChatbotWidget({
                       aspectRatio={1}
                       dominantColors={item.dominant_colors}
                       alt={item.filename}
-                      style={{ width: '100%', height: '100%', borderRadius: '10px' }}
+                      style={{ width: '100%', height: '100%', borderRadius: '8px' }}
                     />
                     {item.status === 'rejected' && (
                       <span className="curation-reject-tag">
@@ -1309,8 +1180,8 @@ export default function AIChatbotWidget({
                 ))}
               </div>
             </div>
-          </div>
-        </div>
+          </aside>
+        </>
       )}
     </div>
   );

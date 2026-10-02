@@ -1662,7 +1662,7 @@ async def process_async_job(
         loop = asyncio.get_running_loop()
         try:
             _update_job(
-                job_id, 20, "Loading photos...",
+                job_id, 20, "Preparing your photos...",
                 session_id=session_id, phase="loading",
             )
             photos = await loop.run_in_executor(
@@ -1683,7 +1683,7 @@ async def process_async_job(
                 return
 
             _update_job(
-                job_id, 45, "Generating story themes...",
+                job_id, 45, "Curating story chapters & themes...",
                 session_id=session_id, phase="themes",
                 detail={"photo_count": len(photos)},
             )
@@ -1710,13 +1710,13 @@ async def process_async_job(
 
             themes_preview = _build_themes_preview(ai_batch, custom_title, subtitle)
             _update_job(
-                job_id, 60, "Choosing your three styles...",
+                job_id, 60, "Styling 3 custom design editions...",
                 session_id=session_id, phase="themes_ready",
                 themes=themes_preview,
             )
 
             _update_job(
-                job_id, 70, "Solving optimal layouts...",
+                job_id, 70, "Composing beautiful spread layouts...",
                 session_id=session_id, phase="layout",
                 themes=themes_preview,
             )
@@ -1728,7 +1728,7 @@ async def process_async_job(
                     "status": "processing",
                     "phase": "layout",
                     "progress": prog,
-                    "message": f"Designing variation {var_idx + 1} of 3 — spread {idx} of {total}",
+                    "message": f"Designing edition {var_idx + 1} of 3 — page {idx} of {total}",
                     "detail": {"variation": var_idx + 1, "spread": idx, "total_spreads": total},
                     "themes": themes_preview,
                 })
@@ -1752,14 +1752,14 @@ async def process_async_job(
 
             if not variations:
                 _update_job(
-                    job_id, 100, "Layout solver produced no variations.",
+                    job_id, 100, "Could not generate book pages. Please try again.",
                     status_value="failed", session_id=session_id, phase="failed",
                 )
                 return
 
             elapsed_ms = (time.perf_counter() - job_start) * 1000
             _update_job(
-                job_id, 100, "Photobook variations generated successfully!",
+                job_id, 100, "Your photobook editions are ready!",
                 status_value="completed",
                 phase="completed",
                 result=GenerateVariationsResponse(

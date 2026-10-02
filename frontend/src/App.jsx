@@ -17,35 +17,35 @@ import './styles/storymode.css';
 const SYNTHESIS_STAGES = [
   {
     id: 1,
-    copy: 'Scanning visual balance, exposure & focal sharpness',
+    copy: 'Reviewing photo quality & highlighting your best shots',
     minProgress: 0,
     completeAt: 20
   },
   {
     id: 2,
-    copy: 'Curating 5-role semantic color harmonies',
+    copy: 'Harmonizing color palettes across every page',
     minProgress: 20,
     completeAt: 45
   },
   {
     id: 3,
-    copy: 'DSA Solver computing golden-ratio double spread bounds',
+    copy: 'Composing balanced, magazine-style page spreads',
     minProgress: 45,
     completeAt: 70
   },
   {
     id: 4,
-    copy: 'Binding cover jacket & 300 DPI pre-flight quality check',
+    copy: 'Perfecting your cover & preparing print-ready pages',
     minProgress: 70,
     completeAt: 100
   }
 ];
 
 const MICRO_FACTS = [
-  '2-Tier temporal & pHash clustering preserves chronological narrative order.',
-  'DSA Layout Solver evaluates golden-ratio double-page partitions per spread.',
-  '300 DPI pre-flight validation checks effective print resolution on every frame.',
-  'Hero cover selector guarantees non-overlapping cover photography across all 3 editions.'
+  'Smart chronological sequencing keeps your memories in the exact order they happened.',
+  'Thoughtful layout balance ensures every photo has room to shine.',
+  'High-resolution print inspection guarantees crisp, vibrant photo reproduction.',
+  'We craft three unique edition styles so you can choose the one you love most.'
 ];
 
 const MAX_CURATION_STRIP_TILES = 48;
@@ -1006,9 +1006,9 @@ function AppContent() {
                 </div>
 
                 <div className="synthesis-title-group">
-                  <span className="synthesis-eyebrow">Pixovo Editorial Engine</span>
-                  <h3>Synthesizing Your Photobook Editions</h3>
-                  <p>{jobMessage || 'Processing layout intelligence...'}</p>
+                  <span className="synthesis-eyebrow">Pixovo Story Studio</span>
+                  <h3>Designing Your Photobook Editions</h3>
+                  <p>{jobMessage || 'Arranging your photos into a beautiful story...'}</p>
                 </div>
 
                 <div className="synthesis-timer-pill">
@@ -1024,7 +1024,7 @@ function AppContent() {
                 />
               </div>
               <div className="synthesis-progress-meta">
-                <span>Checkpoint Progress</span>
+                <span>Creation Progress</span>
                 <span>{displayProgress}%</span>
               </div>
 
@@ -1073,7 +1073,18 @@ function AppContent() {
         )}
 
         {isStoryConversationalStep && (
-          <div key={`story-mode-${storySessionKey}`} className="step-enter-active" style={{ width: '100%' }}>
+          <div
+            key={`story-mode-${storySessionKey}`}
+            className="step-enter-active"
+            style={{
+              width: '100%',
+              background: 'transparent',
+              border: 'none',
+              boxShadow: 'none',
+              transform: 'none',
+              animation: 'none'
+            }}
+          >
             <AIChatbotWidget
               userPrompt={userPrompt}
               setUserPrompt={setUserPrompt}
