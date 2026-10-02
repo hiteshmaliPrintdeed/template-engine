@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Sparkles, Heart, Image as ImageIcon, UploadCloud } from "lucide-react";
+import { useToast } from "./Toast";
 import "../styles/pixovo-intro.css";
 
 // 10 Curated Photographic Memories that soar upwards like ceremonial balloons
@@ -103,6 +104,7 @@ export default function PixovoStoryIntro({
   onReadyForChat,
   isLoading = false
 }) {
+  const toast = useToast();
   // Phase state: 'title' -> 'dissolve' -> 'upload_prompt' -> 'balloons'
   const [introStep, setIntroStep] = useState("title");
   const [isDragOver, setIsDragOver] = useState(false);
@@ -110,6 +112,7 @@ export default function PixovoStoryIntro({
   const fileInputRef = useRef(null);
   const userUrlsRef = useRef([]);
   const pendingFilesRef = useRef(null);
+  const balloonTimerRef = useRef(null);
 
   useEffect(() => {
     // Stage 1: Title holds for 1.2s then dissolves
@@ -128,9 +131,12 @@ export default function PixovoStoryIntro({
     };
   }, []);
 
-  // Cleanup any created object URLs on unmount
+  // Cleanup any created object URLs and pending animation timers on unmount
   useEffect(() => {
     return () => {
+      if (balloonTimerRef.current) {
+        clearTimeout(balloonTimerRef.current);
+      }
       userUrlsRef.current.forEach((url) => {
         try {
           URL.revokeObjectURL(url);
@@ -148,7 +154,14 @@ export default function PixovoStoryIntro({
       f.type.startsWith("image/") || /\.(jpe?g|png|webp|heic|gif)$/i.test(f.name)
     );
 
-    if (imageFiles.length === 0) return;
+    if (imageFiles.length === 0) {
+      toast.show({
+        title: "No photos found",
+        message: "Please drop or select valid image files (JPEG, PNG, WebP, or HEIC).",
+        tone: "warning"
+      });
+      return;
+    }
 
     // Create local object URLs for the flying balloon ceremony
     const newUrls = imageFiles.map((file) => URL.createObjectURL(file));
@@ -173,7 +186,10 @@ export default function PixovoStoryIntro({
     setIntroStep("balloons");
 
     // Once the balloon animation completes smoothly, start upload and reveal chat
-    setTimeout(() => {
+    if (balloonTimerRef.current) {
+      clearTimeout(balloonTimerRef.current);
+    }
+    balloonTimerRef.current = setTimeout(() => {
       // 1. Trigger the photo upload / downsampling pipeline
       if (onPhotosSelected && pendingFilesRef.current) {
         onPhotosSelected(pendingFilesRef.current);

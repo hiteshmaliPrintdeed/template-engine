@@ -103,7 +103,7 @@ const FOLLOWUP_CHIPS = [
 
 // Custom typewriter effect for AI message text with natural streaming and fading options
 function PixovoTypewriterMessage({
-  text,
+  text = '',
   readyContent = null,
   speed = 18,
   isLatest = false,
@@ -111,14 +111,15 @@ function PixovoTypewriterMessage({
   onComplete,
   children
 }) {
-  const [displayedText, setDisplayedText] = useState(isCompleted || !isLatest ? text : '');
+  const safeText = text || '';
+  const [displayedText, setDisplayedText] = useState(isCompleted || !isLatest ? safeText : '');
   const [done, setDone] = useState(isCompleted || !isLatest);
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
 
   useEffect(() => {
     if (isCompleted || !isLatest) {
-      setDisplayedText(text);
+      setDisplayedText(safeText);
       setDone(true);
       return;
     }
@@ -130,20 +131,20 @@ function PixovoTypewriterMessage({
 
     const timer = setInterval(() => {
       index += step;
-      if (index >= text.length) {
-        setDisplayedText(text);
+      if (index >= safeText.length) {
+        setDisplayedText(safeText);
         setDone(true);
         clearInterval(timer);
         if (onCompleteRef.current) {
           onCompleteRef.current();
         }
       } else {
-        setDisplayedText(text.slice(0, index));
+        setDisplayedText(safeText.slice(0, index));
       }
     }, speed);
 
     return () => clearInterval(timer);
-  }, [text, isLatest, isCompleted, speed]);
+  }, [safeText, isLatest, isCompleted, speed]);
 
   return (
     <>
@@ -373,10 +374,10 @@ export default function AIChatbotWidget({
 
   const handleConfirmTitle = (chosenTitle, isSkipped = false) => {
     const titleToUse = isSkipped
-      ? (defaultSuggestedTitles[0] || 'Cherished Memories')
+      ? null
       : (chosenTitle || customTitle.trim() || defaultSuggestedTitles[0] || 'Cherished Memories');
 
-    setCustomTitle(titleToUse);
+    setCustomTitle(titleToUse || '');
     if (!customSubtitle.trim()) {
       setCustomSubtitle('A COLLECTION OF MEMORIES');
     }
@@ -396,7 +397,9 @@ export default function AIChatbotWidget({
       id: `a-${Date.now() + 1}`,
       role: 'ai',
       step: 'ready',
-      text: `Your book is ready! We'll create your edition with ${pCount} curated photos, ${styleDesc}, and titled "${titleToUse}".`
+      text: isSkipped
+        ? `Your book is ready! We'll create your edition with ${pCount} curated photos, ${styleDesc}, and auto-tailored cover titles.`
+        : `Your book is ready! We'll create your edition with ${pCount} curated photos, ${styleDesc}, and titled "${titleToUse}".`
     };
 
     const nextMsgs = [...messages, userMsg, readyAiMsg];
@@ -878,7 +881,15 @@ export default function AIChatbotWidget({
                       readyContent={
                         msg.step === 'ready' ? (
                           <p className="pixovo-chat-ai-text">
-                            Your book is ready! We'll create your edition with <strong>{survivedCount || totalCount} curated photos</strong>, <strong>{includeText ? (usePhotoVision ? 'Storytelling Captions (AI Vision)' : 'Storytelling Captions') : 'Clean Photo-Forward'}</strong>, and titled <strong>"{customTitle || defaultSuggestedTitles[0] || 'Cherished Memories'}"</strong>.
+                            {customTitle ? (
+                              <>
+                                Your book is ready! We'll create your edition with <strong>{survivedCount || totalCount} curated photos</strong>, <strong>{includeText ? (usePhotoVision ? 'Storytelling Captions (AI Vision)' : 'Storytelling Captions') : 'Clean Photo-Forward'}</strong>, and titled <strong>"{customTitle}"</strong>.
+                              </>
+                            ) : (
+                              <>
+                                Your book is ready! We'll create your edition with <strong>{survivedCount || totalCount} curated photos</strong>, <strong>{includeText ? (usePhotoVision ? 'Storytelling Captions (AI Vision)' : 'Storytelling Captions') : 'Clean Photo-Forward'}</strong>, and auto-tailored cover titles.
+                              </>
+                            )}
                           </p>
                         ) : null
                       }
